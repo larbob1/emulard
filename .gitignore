@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+*.zip
+local-reports/
+preflight.txt
