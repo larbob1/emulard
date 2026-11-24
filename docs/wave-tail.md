@@ -1,0 +1,9 @@
+# Wave64 tail handling on 32-lane hosts
+
+A group of 96 threads contains one complete console wave and a final lower half with no upper partner. The pinned exchange reads both LDS slots even though the final upper slot is never written. This candidate redirects that read to the initialized lower slot and returns zero as the empty upper mask. A reduction uses its original lower-half result when no partner exists; zero is not a neutral value for AND or arbitrary min/max. Prefix and ballot paths retain their appropriate empty-half behavior.
+
+The existing logical thread-index allocator reserves 32 lanes per host wave, so a partially filled host wave in a larger group could obtain a slot before a full wave and assign out-of-range logical IDs. The candidate retains the native wave requirement for those group sizes rather than advertise an unsafe split. Full groups and a single short host wave remain eligible under the existing analysis. This restriction can reduce the number of accepted programs.
+
+The two layout tests and the synthetic 64/96/128/160-thread translation regression are explicitly included in CI. The latter validates DXIL when the validator is available but does not execute the shader or compare GPU results. The pinned sources and both patch compositions were checked for exact anchors; actual compilation remains pending.
+
+Marvisak's lowerer retains the console wave requirement rather than providing a compatible replacement for the existing split-wave exchange. The reviewed upstream fork's barrier restrictions and the builder's strict approximation policy remain unchanged. This does not solve all divergent cross-wave operations, incomplete group layouts, or synchronization of multiple independently branching console waves. It is not a claim of full Wave64 emulation, completed structure construction, or corrected lighting.

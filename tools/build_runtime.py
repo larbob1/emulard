@@ -68,6 +68,8 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-shader", "local_relative_index_bounds_are_conservative"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_compare_exchange_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "positive_mask_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "wave_tail_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "unpaired_host_wave_lowers_without_partner"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "snapshot_reservation_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "idle_snapshot_pool_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)

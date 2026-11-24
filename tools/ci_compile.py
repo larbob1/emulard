@@ -61,6 +61,8 @@ def main():
                 ("Relative index bounds", "victory-shader", "local_relative_index_bounds_are_conservative"),
                 ("Global compare exchange", "victory-shader", "raw_compare_exchange_lowering"),
                 ("Positive wave mask proof", "victory-shader", "positive_mask_tests"),
+                ("Wave tail layout", "victory-shader", "wave_tail_tests"),
+                ("Unpaired host wave lowering", "victory-shader", "unpaired_host_wave_lowers_without_partner"),
                 ("Snapshot budget reservation", "victory-gpu", "snapshot_reservation_tests"),
                 ("Idle snapshot pool limit", "victory-gpu", "idle_snapshot_pool_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
