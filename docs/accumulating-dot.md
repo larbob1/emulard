@@ -1,0 +1,7 @@
+# Accumulating byte dot and ray directory regression
+
+The pinned decoder recognizes the two-source signed byte dot accumulator instruction but the lowerer previously refused it. Marvisak/VIctory has a corresponding implementation. This candidate independently emits four signed byte multiplications and a wrapping accumulator sum. It also explicitly records the previous destination as an arithmetic input in the IR, rather than depending on inactive-lane preservation. Unsupported modifier combinations remain rejected.
+
+Three new Rust regression functions cover operand tracking, shader lowering and GPU reference execution. Only the first two are invoked automatically; the GPU reference test is available to run on a suitable local device. The existing synthetic ray directory translation test is now explicitly included in both CI configurations. It covers 32-bit and 64-bit node addressing and root binding requirements without requiring a game or GPU execution. It does not validate the acceleration structure builder.
+
+Both runtime configurations passed full compilation at 76de234. The more recent descriptor and relative-register candidates were still being compiled when this revision was prepared; their synthetic checks passed. The source anchors of this update were checked against both shader patch compositions, but the updated Rust code is not yet compile-verified. No improvement in measured frame rate or real shader coverage is claimed.
