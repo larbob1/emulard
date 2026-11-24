@@ -12,12 +12,15 @@ class PatcherTests(unittest.TestCase):
             candidate.patch_source(candidate.HOST, b"unexpected")
 
     def test_host_edit(self):
-        src = "".join(f"line{i}\n" for i in range(1, 6500)).encode()
+        lines = [f"line{i}\n" for i in range(1, 6500)]
+        lines[4867:4869] = ["                *n += len;\n", "                return;\n"]
+        src = "".join(lines).encode()
         with patch.dict(candidate.EXPECTED, {candidate.HOST: candidate.blob_hash(src)}):
             result = candidate.patch_source(candidate.HOST, src).decode()
         self.assertIn("line1592\n    raw_copy_progress:", result)
         self.assertIn("line1604\n#[derive(Default)]", result)
         self.assertIn("line5053\n    /// Track", result)
+        self.assertIn("*n += len;\n                deferred.refreshed.clear();\n                deferred.raw_copy_progress.invalidate_reads();\n                return;", result)
 
     def test_memory_edit_and_crlf(self):
         src = "".join(f"line{i}\n" for i in range(1, 321)).encode()
