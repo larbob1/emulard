@@ -51,6 +51,7 @@ def main():
                 ("Startup compiler memory cap", "victory-gpu", "startup_worker_tests"),
                 ("Texture budget", "victory-gpu", "texture_budget_tests"),
                 ("Wave retry policy", "victory-shader", "wave_retry_policy_tests"),
+                ("Host wave cache key", "victory-gpu", "wave_cache_key_tests"),
                 ("Raw scalar-base addressing", "victory-shader", "raw_scalar_base_global_access_lowers"),
                 ("Packed-byte dot lowering", "victory-shader", "packed_byte_dot_lowering"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
