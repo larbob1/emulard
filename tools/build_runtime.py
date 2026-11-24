@@ -43,6 +43,10 @@ def main():
         if ns.lighting_memory:
             dot.append("--lighting-memory")
         run(dot, target)
+        heap = [sys.executable, str(PATCHER.with_name("apply_heap_patch.py")), str(target), "--apply"]
+        if ns.lighting_memory:
+            heap.append("--lighting-memory")
+        run(heap, target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:

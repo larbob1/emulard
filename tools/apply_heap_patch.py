@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Move raw-address descriptor runs into their owning host heaps."""
+import argparse
+from pathlib import Path
+import subprocess
+import sys
+from apply_memory_patch import blob_hash, patch_source as memory_patch
+from apply_fault_bitmap import SPECS as FEEDBACK_SPECS, transform as feedback_patch
+
+SPECS = [["crates/victory-gpu/src/memory.rs","c25636783511fdfbf9692fdd36ef150f69ea666e",[["use std::collections::HashMap;\n",""],["    /// Per host view heap (by address): the first slot of its run, and how\n    /// many copies have their view there.\n    heaps: HashMap<usize, (u32, u32)>,\n",""],["            heaps: HashMap::new(),\n",""],["    let key = std::ptr::from_ref(heap) as usize;\n    let (base, made) = match m.heaps.get(&key) {\n        Some(&run) => run,\n        None => {\n            // Held for the heap's life: not given back with a list's slots.\n            let base = heap.dynamic(COPIES + 1)?;\n            heap.null_raw_uav_at(base);\n            (base, 0)\n        }\n    };\n    for (n, shadow) in m.copies.iter().enumerate().skip(made as usize) {\n        let (_, len) = shadow.span();\n        heap.raw_uav_at(base + 1 + n as u32, &shadow.buffer, 0, len);\n    }\n    m.heaps.insert(key, (base, m.copies.len() as u32));","    // The descriptor run belongs to the heap object, not its address.\n    // A newly allocated heap must never inherit another heap's slots.\n    let base = heap.raw_memory_slots(&m.copies, COPIES)?;"]]],["crates/victory-gpu/src/descriptor/host.rs","e91db795b279fbe02a72f3c87646b53a1a12d7a4",[["    pub(crate) heap: ID3D12DescriptorHeap,\n","    pub(crate) heap: ID3D12DescriptorHeap,\n    /// Raw-address descriptor slots owned by this heap.\n    raw_memory: Mutex<Option<(u32, usize)>>,\n"],["        let h = HostHeap {\n            heap,","        let h = HostHeap {\n            heap,\n            raw_memory: Mutex::default(),"],["    pub(crate) fn dynamic(&self, n: u32) -> Option<u32> {","    /// Reserve a raw-memory descriptor run for this heap's own lifetime.\n    /// Initialize every slot before publishing it: a directory entry\n    /// created after this list was recorded can otherwise name an\n    /// uninitialized descriptor on an older heap.\n    pub(crate) fn raw_memory_slots(\n        &self, copies: &[std::sync::Arc<crate::shadow::Shadow>], capacity: u32,\n    ) -> Option<u32> {\n        if copies.len() > capacity as usize {\n            return None;\n        }\n        let mut run = self.raw_memory.lock().unwrap_or_else(|e| e.into_inner());\n        let (base, made) = match *run {\n            Some((base, made)) => (base, made),\n            None => {\n                let base = self.dynamic(capacity.checked_add(1)?)?;\n                for slot in 0..=capacity {\n                    self.null_raw_uav_at(base + slot);\n                }\n                (base, 0)\n            }\n        };\n        for (n, shadow) in copies.iter().enumerate().skip(made) {\n            let (_, len) = shadow.span();\n            self.raw_uav_at(base + 1 + n as u32, &shadow.buffer, 0, len);\n        }\n        *run = Some((base, copies.len()));\n        Some(base)\n    }\n\n    pub(crate) fn dynamic(&self, n: u32) -> Option<u32> {"]]]]
+
+def normalize(data):
+    return data.replace(b"\r\n", b"\n")
+
+def transform(data, edits):
+    source = normalize(data).decode("utf-8")
+    for before, after in edits:
+        if source.count(before) != 1:
+            raise ValueError("Descriptor lifetime anchor differs.")
+        source = source.replace(before, after)
+    result = source.encode("utf-8")
+    return result.replace(b"\n", b"\r\n") if b"\r\n" in data else result
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("checkout", type=Path)
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--lighting-memory", action="store_true")
+    args = parser.parse_args()
+    root = args.checkout.resolve()
+    try:
+        if not (root / ".git").exists():
+            raise ValueError("Separate checkout required.")
+        pending = {}
+        for path, expected, edits in SPECS:
+            target = root / path
+            if target.resolve() != target or not target.is_file():
+                raise ValueError("Invalid source path.")
+            original = subprocess.check_output(["git", "show", "HEAD:" + path], cwd=root)
+            if blob_hash(normalize(original)) != expected:
+                raise ValueError("Pinned source differs.")
+            predecessor = original
+            if path == SPECS[0][0]:
+                predecessor = memory_patch(path, original)
+                if args.lighting_memory:
+                    feedback_edits = next(e for p, _, e in FEEDBACK_SPECS if p == path)
+                    predecessor = feedback_patch(predecessor, feedback_edits)
+            current = target.read_bytes()
+            if normalize(current) != normalize(predecessor):
+                raise ValueError("Unexpected predecessor source.")
+            pending[target] = transform(current, edits)
+        if args.apply:
+            for target, data in pending.items():
+                target.write_bytes(data)
+        print("Descriptor lifetime source checks passed.")
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        print("Descriptor lifetime preparation failed.", file=sys.stderr)
+        return 1
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())
