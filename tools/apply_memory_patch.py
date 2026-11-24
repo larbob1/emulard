@@ -44,10 +44,24 @@ def patch_source(path, data):
     updated = "".join(lines).encode("utf-8")
     return updated.replace(b"\n", b"\r\n") if b"\r\n" in data else updated
 
+# Applied after the memory scheduling edits because both target host.rs.
+SCRATCH_EDITS = [["const SPARE_MOST: u64 = 128 << 20;","const SPARE_MOST: u64 = 128 << 20;\n\n/// Retention limit for unused upload chunks, independent of live GPU allocations.\nfn spare_limit(value: Option<&str>) -> u64 {\n    value.and_then(|s| s.trim().parse::<u64>().ok())\n        .map(|mb| mb.min(128) << 20)\n        .unwrap_or(SPARE_MOST)\n}\n\nfn spare_most() -> u64 {\n    static LIMIT: OnceLock<u64> = OnceLock::new();\n    *LIMIT.get_or_init(|| spare_limit(std::env::var(\"EMULARD_SCRATCH_IDLE_MB\").ok().as_deref()))\n}\n\n#[cfg(test)]\nmod scratch_limit_tests {\n    use super::{spare_limit, Spare, SPARE_MOST};\n\n    #[test]\n    fn default_and_explicit_limits() {\n        assert_eq!(spare_limit(None), SPARE_MOST);\n        assert_eq!(spare_limit(Some(\"bad\")), SPARE_MOST);\n        assert_eq!(spare_limit(Some(\" 32 \")), 32 << 20);\n        assert_eq!(spare_limit(Some(\"0\")), 0);\n        assert_eq!(spare_limit(Some(\"18446744073709551615\")), SPARE_MOST);\n    }\n\n    #[test]\n    fn returns_unused_chunks_when_budget_is_full() {\n        let mut pool = Spare::new();\n        let limit = spare_limit(Some(\"1\"));\n        assert_eq!(pool.give(1, 1 << 20, limit), None);\n        assert_eq!(pool.give(2, 1, limit), Some(2));\n        assert_eq!(pool.take(1 << 20), Some(1));\n        assert_eq!(pool.give(3, 1, 0), Some(3));\n    }\n\n    #[test]\n    fn rejects_overflow_without_changing_pool() {\n        let mut pool = Spare::new();\n        assert_eq!(pool.give(1, u64::MAX, u64::MAX), None);\n        assert_eq!(pool.give(2, 1, u64::MAX), Some(2));\n        assert_eq!(pool.take(u64::MAX), Some(1));\n    }\n}"],["spare.give(chunk, size, SPARE_MOST)","spare.give(chunk, size, spare_most())"],["if self.bytes + size > most {","if size > most.saturating_sub(self.bytes) {"]]
+
+def patch_scratch(data):
+    source = data.decode("utf-8")
+    crlf = "\r\n" in source
+    source = source.replace("\r\n", "\n")
+    for before, after in SCRATCH_EDITS:
+        if source.count(before) != 1:
+            raise ValueError("Scratch pool source anchor differs.")
+        source = source.replace(before, after)
+    return (source.replace("\n", "\r\n") if crlf else source).encode("utf-8")
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--scratch-budget", action="store_true", help="add configurable idle upload pool cap")
     args = parser.parse_args()
     root = args.checkout.resolve()
     try:
@@ -58,7 +72,10 @@ def main():
             target = root / path
             if target.resolve() != target or not target.is_file():
                 raise ValueError(f"Invalid source path: {path}")
-            pending[target] = patch_source(path, target.read_bytes())
+            data = patch_source(path, target.read_bytes())
+            if args.scratch_budget and path == HOST:
+                data = patch_scratch(data)
+            pending[target] = data
         if args.apply:
             for target, data in pending.items():
                 target.write_bytes(data)

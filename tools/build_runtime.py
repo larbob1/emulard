@@ -30,7 +30,7 @@ def main():
         run(["git", "clone", "--no-checkout", UPSTREAM, str(target)])
         run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
         run(["git", "checkout", "--detach", REVISION], target)
-        run([sys.executable, str(PATCHER), str(target), "--apply"])
+        run([sys.executable, str(PATCHER), str(target), "--apply", "--scratch-budget"])
         run([sys.executable, str(PATCHER.with_name("apply_query_patch.py")), str(target), "--apply"])
         if ns.lighting_memory:
             run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply"])
@@ -39,6 +39,7 @@ def main():
         if ns.build:
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "query_range_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "scratch_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "wave_retry_policy_tests"], target)
             run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
             run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)

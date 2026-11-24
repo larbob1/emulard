@@ -45,6 +45,7 @@ def main():
             suites = [
                 ("Memory scheduling", "victory-gpu", "raw_copy_progress_tests"),
                 ("Query bounds", "victory-gpu", "query_range_tests"),
+                ("Idle upload pool", "victory-gpu", "scratch_limit_tests"),
                 ("Wave retry policy", "victory-shader", "wave_retry_policy_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
             ]
