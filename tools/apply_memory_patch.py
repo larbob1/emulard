@@ -28,10 +28,19 @@ def patch_source(path, data):
         lines[5053:5053] = [METHOD]
         lines[1604:1604] = [TRACKER]
         lines[1592:1592] = ["    raw_copy_progress: RawCopyProgress,\n"]
+        # Joined CPU copies return before the ordinary invalidation.
+        joined = "                *n += len;\n                return;\n"
+        fixed = "                *n += len;\n                deferred.refreshed.clear();\n                return;\n"
+        combined = "".join(lines)
+        if combined.count(joined) != 1:
+            raise ValueError("Joined copy source anchor differs.")
+        lines = combined.replace(joined, fixed).splitlines(keepends=True)
+        # The generic invalidation pass below also updates raw-copy progress.
         # Preserve the existing deferred-copy invalidation semantics.
         for i in range(len(lines) - 1, -1, -1):
-            if lines[i] == "        deferred.refreshed.clear();\n":
-                lines.insert(i + 1, "        deferred.raw_copy_progress.invalidate_reads();\n")
+            if lines[i].strip() == "deferred.refreshed.clear();":
+                indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+                lines.insert(i + 1, indent + "deferred.raw_copy_progress.invalidate_reads();\n")
         original = "        self.deferred().copies.push(Step::Run(Box::new(work)));\n        self.deferred().refreshed.clear();\n"
         replacement = "        let mut deferred = self.deferred();\n        deferred.copies.push(Step::Run(Box::new(work)));\n        deferred.refreshed.clear();\n        deferred.raw_copy_progress.invalidate_reads();\n"
         combined = "".join(lines)
