@@ -35,6 +35,8 @@ def main():
         if ns.lighting_memory:
             run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply"])
             run([sys.executable, str(PATCHER.with_name("apply_fault_bitmap.py")), str(target), "--apply"])
+        else:
+            run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply", "--scalar-only"])
         run([sys.executable, str(PATCHER.with_name("apply_wave_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_builder_patch.py")), str(target), "--apply"])
         run(["git", "diff", "--check"], target)
@@ -45,6 +47,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "query_range_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "scratch_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "wave_retry_policy_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_scalar_base_global_access_lowers"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "startup_worker_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "texture_budget_tests"], target)

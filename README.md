@@ -41,6 +41,10 @@ Use a new directory outside this repository for each source preparation. Add --b
 
 See [runtime compilation](docs/runtime-compile.md), [runtime bring-up](docs/runtime-bringup.md), and [lighting development](docs/lighting-memory.md).
 
+## GPU memory integration
+
+See [cross-project GPU memory review](docs/gpu-memory-integration.md) for the raw scalar-base address candidate and remaining dirty-page integration work.
+
 ## Performance target
 
 10 FPS means at most 100 ms per frame. The fastest upstream reported world intervals are about 240–350 ms on another machine. Reducing copies, waits and compilation stalls while preserving correct rendering is the initial objective. No performance result for Emulard has been established.
