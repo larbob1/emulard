@@ -62,6 +62,7 @@ def main():
                 ("Global compare exchange", "victory-shader", "raw_compare_exchange_lowering"),
                 ("Positive wave mask proof", "victory-shader", "positive_mask_tests"),
                 ("Snapshot budget reservation", "victory-gpu", "snapshot_reservation_tests"),
+                ("Idle snapshot pool limit", "victory-gpu", "idle_snapshot_pool_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
             ]
             if args.lighting_memory:

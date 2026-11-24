@@ -1,0 +1,7 @@
+# Idle snapshot and GPU allocation budgets
+
+The baseline idle snapshot pool kept its largest allocation even if that allocation exceeded the nominal 512 MiB cap. The candidate strictly limits the combined capacity of idle buffers and skips buffers that cannot fit. Set EMULARD_SNAPSHOT_IDLE_MB to a value from 0 through 512; the default is 512. A value of 128 reduces the configured idle pool ceiling by 384 MiB. Zero disables idle snapshot reuse. None of these settings limits active snapshots, total process memory, or the separate opt-in retained snapshot cache. Lower caps may increase allocation and page-fault overhead; benchmark before selecting a default for a particular system.
+
+The optional device-local buffer and window allocation counters now use the existing checked atomic reservation helper. Environment conversion and driver budget addition are overflow-safe. Failed allocations return their reservation as before. The driver budget check is advisory and may change concurrently; these separate caps are not a guarantee against device-memory exhaustion.
+
+Two new Rust tests check the idle pool's count and capacity limits. The revision-pinned transformation checks all five new source anchors. Both configurations include this patch. No source from other projects is copied; the memory-budget approach follows the earlier independent review of their memory-aware scheduling. No live write filtering, builder changes, new shader coverage, or hardware performance claims are included.

@@ -69,6 +69,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_compare_exchange_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "positive_mask_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "snapshot_reservation_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "idle_snapshot_pool_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "startup_worker_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "texture_budget_tests"], target)
