@@ -54,6 +54,10 @@ def main():
                 ("Host wave cache key", "victory-gpu", "wave_cache_key_tests"),
                 ("Raw scalar-base addressing", "victory-shader", "raw_scalar_base_global_access_lowers"),
                 ("Packed-byte dot lowering", "victory-shader", "packed_byte_dot_lowering"),
+                ("Packed-half dot lowering", "victory-shader", "packed_half_dot_lowering"),
+                ("Global compare exchange", "victory-shader", "raw_compare_exchange_lowering"),
+                ("Positive wave mask proof", "victory-shader", "positive_mask_tests"),
+                ("Snapshot budget reservation", "victory-gpu", "snapshot_reservation_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
             ]
             if args.lighting_memory:

@@ -22,9 +22,9 @@ class PackedDotTests(unittest.TestCase):
     def test_unique_anchor(self):
         for _,_,edits in SPECS:
             for before,after in edits:
-                self.assertEqual(transform(before.encode(),edits).decode(),after)
+                self.assertEqual(transform(before.encode(),[(before,after)]).decode(),after)
                 with self.assertRaises(ValueError):
-                    transform((before+before).encode(),edits)
+                    transform((before+before).encode(),[(before,after)])
 
 if __name__ == "__main__":
     unittest.main()
