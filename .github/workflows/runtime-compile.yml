@@ -1,0 +1,38 @@
+name: Runtime compile validation
+
+on:
+  push:
+    branches: [dev/compatibility-baseline]
+    paths:
+      - 'tools/**'
+      - '.github/workflows/runtime-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, page-safe]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare and compile baseline
+        if: matrix.mode == 'baseline'
+        run: python tools/ci_compile.py
+      - name: Prepare and compile page-safe candidate
+        if: matrix.mode == 'page-safe'
+        run: python tools/ci_compile.py --lighting-memory
