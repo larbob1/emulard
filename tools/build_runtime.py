@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Prepare and optionally compile a pinned, separate runtime checkout."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+UPSTREAM = "https://github.com/fxceless/victory-fork.git"
+REVISION = "2119b0e44c53aa9648307b0c5c73590290305b1f"
+PATCHER = Path(__file__).resolve().with_name("apply_memory_patch.py")
+
+def run(args, cwd=None):
+    subprocess.run(args, cwd=cwd, check=True)
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("checkout", type=Path, help="new directory outside this repository")
+    ap.add_argument("--build", action="store_true", help="compile using the Windows toolchain")
+    ns = ap.parse_args()
+    target = ns.checkout.resolve()
+    own = PATCHER.parent.parent
+    if target.exists() or target == own or own in target.parents:
+        ap.error("Select a new directory outside this repository.")
+    if ns.build and os.name != "nt":
+        ap.error("The reviewed runtime currently requires a Windows build host.")
+    try:
+        run(["git", "clone", "--no-checkout", UPSTREAM, str(target)])
+        run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
+        run(["git", "checkout", "--detach", REVISION], target)
+        run([sys.executable, str(PATCHER), str(target), "--apply"])
+        run(["git", "diff", "--check"], target)
+        if ns.build:
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
+            run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
+            run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
+        else:
+            print("Patched source prepared; compilation not attempted.")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print("Preparation/build failed; inspect the local checkout and command output.", file=sys.stderr)
+        return 1
+    return 0
+
+if __name__ == "__main__":
+    raise SystemExit(main())

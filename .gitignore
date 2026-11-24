@@ -4,3 +4,7 @@ __pycache__/
 *.zip
 local-reports/
 preflight.txt
+
+build-probes/
+*.exe
+*.obj
