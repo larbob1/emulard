@@ -23,6 +23,10 @@ These projects are read-only. The latter two are references, not merged runtimes
 | Lighting and stable world rendering | Unresolved |
 | Linux compatibility and performance | Unverified |
 
+## First launch
+
+See [first launch readiness](docs/first-launch.md) for the recommended CI-compiled source revision, optional local cross-build and synthetic Wine checks. No playable build has been established.
+
 ## Local development
 
 Prerequisites for full runtime compilation: Windows x64, the upstream pinned Rust toolchain, a recent Windows SDK and build tools. GPU testing additionally requires D3D12 Shader Model 6.6 and mesh shaders. Linux is supported for the local diagnostics and synthetic native probes; runtime execution through a compatibility layer is unverified.
