@@ -46,6 +46,7 @@ def main():
                 ("Memory scheduling", "victory-gpu", "raw_copy_progress_tests"),
                 ("Query bounds", "victory-gpu", "query_range_tests"),
                 ("Idle upload pool", "victory-gpu", "scratch_limit_tests"),
+                ("Write declaration index", "victory-gpu", "write_index_tests"),
                 ("Pipeline worker cap", "victory-gpu", "worker_limit_tests"),
                 ("Startup compiler memory cap", "victory-gpu", "startup_worker_tests"),
                 ("Texture budget", "victory-gpu", "texture_budget_tests"),

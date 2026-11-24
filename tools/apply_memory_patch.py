@@ -57,11 +57,25 @@ def patch_scratch(data):
         source = source.replace(before, after)
     return (source.replace("\n", "\r\n") if crlf else source).encode("utf-8")
 
+# Applied after the revision-pinned scheduling and idle pool edits.
+WRITE_INDEX_EDITS = [["fn declared_writes(runs: &[&HostList]) -> Vec<Declared> {\n    let mut back: Vec<Declared> = Vec::new();\n    for list in runs {\n        for step in &list.deferred().copies {\n            if let Step::GpuWrite(shadow, address, len) = step {\n                let range = (*address, *address + *len);\n                match back.iter_mut().find(|(s, _)| std::sync::Arc::ptr_eq(s, shadow)) {\n                    Some((_, ranges)) => {\n                        if !ranges.contains(&range) {\n                            ranges.push(range);\n                        }\n                    }\n                    None => back.push((shadow.clone(), vec![range])),\n                }\n            }\n        }\n    }\n    back\n}\n","/// Preserve first-seen copy and range order, with constant-time duplicate\n/// detection. Keep overlapping (but not identical) ranges unchanged.\nstruct WriteIndex<K> {\n    groups: Vec<(K, Vec<(usize, usize)>)>,\n    positions: std::collections::HashMap<K, usize>,\n    seen: std::collections::HashSet<(K, usize, usize)>,\n}\n\nimpl<K: Copy + Eq + std::hash::Hash> WriteIndex<K> {\n    fn new() -> Self {\n        Self {\n            groups: Vec::new(),\n            positions: std::collections::HashMap::new(),\n            seen: std::collections::HashSet::new(),\n        }\n    }\n\n    fn add(&mut self, key: K, from: usize, to: usize) {\n        if !self.seen.insert((key, from, to)) {\n            return;\n        }\n        let index = *self.positions.entry(key).or_insert_with(|| {\n            let index = self.groups.len();\n            self.groups.push((key, Vec::new()));\n            index\n        });\n        self.groups[index].1.push((from, to));\n    }\n}\n\n#[cfg(test)]\nmod write_index_tests {\n    use super::WriteIndex;\n\n    #[test]\n    fn retains_first_seen_order_and_overlapping_ranges() {\n        let mut index = WriteIndex::new();\n        for (key, from, to) in [(7, 10, 20), (2, 3, 5), (7, 10, 20),\n                                (7, 15, 25), (2, 3, 5), (2, 8, 9)] {\n            index.add(key, from, to);\n        }\n        assert_eq!(index.groups, vec![(7, vec![(10, 20), (15, 25)]),\n                                      (2, vec![(3, 5), (8, 9)])]);\n    }\n\n    #[test]\n    fn duplicate_heavy_workload() {\n        let mut index = WriteIndex::new();\n        for _ in 0..100 {\n            for key in 0..64 {\n                index.add(key, 0, 65536);\n            }\n        }\n        assert_eq!(index.groups.len(), 64);\n        assert_eq!(index.seen.len(), 64);\n        assert!(index.groups.iter().all(|(_, ranges)| ranges.len() == 1));\n    }\n}\n\nfn declared_writes(runs: &[&HostList]) -> Vec<Declared> {\n    let mut index = WriteIndex::new();\n    let mut copies = std::collections::HashMap::new();\n    for list in runs {\n        for step in &list.deferred().copies {\n            if let Step::GpuWrite(shadow, address, len) = step {\n                let key = std::sync::Arc::as_ptr(shadow) as usize;\n                copies.entry(key).or_insert_with(|| shadow.clone());\n                index.add(key, *address, *address + *len);\n            }\n        }\n    }\n    index.groups.into_iter().map(|(key, ranges)| {\n        (copies.remove(&key).expect(\"indexed copy retained\"), ranges)\n    }).collect()\n}\n"],["        // The ranges this submission's shaders may write, per copy.\n        let mut declared: Vec<(Arc<crate::shadow::Shadow>, Vec<(usize, usize)>)> = Vec::new();\n        for list in runs {\n            for step in &list.deferred().copies {\n                if let Step::GpuWrite(shadow, address, len) = step\n                    && shadow.carded()\n                {\n                    let range = (*address, *address + *len);\n                    match declared.iter_mut().find(|(s, _)| Arc::ptr_eq(s, shadow)) {\n                        Some((_, ranges)) => {\n                            if !ranges.contains(&range) {\n                                ranges.push(range);\n                            }\n                        }\n                        None => declared.push((shadow.clone(), vec![range])),\n                    }\n                }\n            }\n        }\n","        // Use the same first-seen declaration index as CPU writeback.\n        let declared: Vec<Declared> = declared_writes(runs).into_iter()\n            .filter(|(shadow, _)| shadow.carded())\n            .collect();\n"]]
+
+def patch_write_index(data):
+    source = data.decode("utf-8")
+    crlf = "\r\n" in source
+    source = source.replace("\r\n", "\n")
+    for before, after in WRITE_INDEX_EDITS:
+        if source.count(before) != 1:
+            raise ValueError("Write index source anchor differs.")
+        source = source.replace(before, after)
+    return (source.replace("\n", "\r\n") if crlf else source).encode("utf-8")
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkout", type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--scratch-budget", action="store_true", help="add configurable idle upload pool cap")
+    parser.add_argument("--write-index", action="store_true", help="index repeated GPU write declarations")
     args = parser.parse_args()
     root = args.checkout.resolve()
     try:
@@ -75,6 +89,8 @@ def main():
             data = patch_source(path, target.read_bytes())
             if args.scratch_budget and path == HOST:
                 data = patch_scratch(data)
+            if args.write_index and path == HOST:
+                data = patch_write_index(data)
             pending[target] = data
         if args.apply:
             for target, data in pending.items():

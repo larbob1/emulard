@@ -37,8 +37,11 @@ class LightingTests(unittest.TestCase):
         with patch.object(candidate, "EXPECTED", blob_hash(data)):
             result = candidate.patch_source(data).decode()
         for before, after in candidate.EDITS:
-            self.assertNotIn(before, result)
             self.assertIn(after, result)
+            if before not in after:
+                self.assertNotIn(before, result)
+            else:
+                self.assertEqual(result.count(before), 1)
 
     def test_revision_rejected(self):
         with self.assertRaises(ValueError):
