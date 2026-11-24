@@ -30,9 +30,11 @@ def main():
         run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
         run(["git", "checkout", "--detach", REVISION], target)
         run([sys.executable, str(PATCHER), str(target), "--apply"])
+        run([sys.executable, str(PATCHER.with_name("apply_query_patch.py")), str(target), "--apply"])
         run(["git", "diff", "--check"], target)
         if ns.build:
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "query_range_tests"], target)
             run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
             run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
         else:
