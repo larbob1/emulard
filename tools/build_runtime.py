@@ -43,6 +43,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "scratch_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "wave_retry_policy_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "startup_worker_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "texture_budget_tests"], target)
             run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
             run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)

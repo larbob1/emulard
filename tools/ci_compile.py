@@ -47,6 +47,7 @@ def main():
                 ("Query bounds", "victory-gpu", "query_range_tests"),
                 ("Idle upload pool", "victory-gpu", "scratch_limit_tests"),
                 ("Pipeline worker cap", "victory-gpu", "worker_limit_tests"),
+                ("Startup compiler memory cap", "victory-gpu", "startup_worker_tests"),
                 ("Texture budget", "victory-gpu", "texture_budget_tests"),
                 ("Wave retry policy", "victory-shader", "wave_retry_policy_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
