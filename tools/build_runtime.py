@@ -39,6 +39,10 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply", "--scalar-only"])
         run([sys.executable, str(PATCHER.with_name("apply_wave_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_builder_patch.py")), str(target), "--apply"])
+        dot = [sys.executable, str(PATCHER.with_name("apply_dot_patch.py")), str(target), "--apply"]
+        if ns.lighting_memory:
+            dot.append("--lighting-memory")
+        run(dot, target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:
@@ -50,6 +54,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "write_index_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "wave_retry_policy_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_scalar_base_global_access_lowers"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "packed_byte_dot_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "startup_worker_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "texture_budget_tests"], target)
