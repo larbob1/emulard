@@ -52,6 +52,8 @@ def main():
                 ("Wave retry policy", "victory-shader", "wave_retry_policy_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
             ]
+            if args.lighting_memory:
+                suites.append(("Fault bitmap decoding", "victory-gpu", "fault_bitmap_tests"))
             for label, package, name in suites:
                 run_stage(label, ["cargo", "test", "--locked", "-p", package, "--lib", name], target)
             run_stage("Release runtime compilation", ["cargo", "build", "--locked", "--release", "-p", "victory"], target)

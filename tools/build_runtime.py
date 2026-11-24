@@ -34,10 +34,13 @@ def main():
         run([sys.executable, str(PATCHER.with_name("apply_query_patch.py")), str(target), "--apply"])
         if ns.lighting_memory:
             run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply"])
+            run([sys.executable, str(PATCHER.with_name("apply_fault_bitmap.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_wave_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_builder_patch.py")), str(target), "--apply"])
         run(["git", "diff", "--check"], target)
         if ns.build:
+            if ns.lighting_memory:
+                run(["cargo", "test", "--locked", "-p", "victory-gpu", "fault_bitmap_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "query_range_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "scratch_limit_tests"], target)
