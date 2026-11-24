@@ -18,6 +18,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("checkout", type=Path, help="new directory outside this repository")
     ap.add_argument("--build", action="store_true", help="compile using the Windows toolchain")
+    ap.add_argument("--lighting-memory", action="store_true", help="apply the experimental shader page-boundary candidate")
     ns = ap.parse_args()
     target = ns.checkout.resolve()
     own = PATCHER.parent.parent
@@ -31,6 +32,8 @@ def main():
         run(["git", "checkout", "--detach", REVISION], target)
         run([sys.executable, str(PATCHER), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_query_patch.py")), str(target), "--apply"])
+        if ns.lighting_memory:
+            run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply"])
         run(["git", "diff", "--check"], target)
         if ns.build:
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
