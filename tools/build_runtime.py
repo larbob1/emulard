@@ -47,6 +47,7 @@ def main():
         if ns.lighting_memory:
             heap.append("--lighting-memory")
         run(heap, target)
+        run([sys.executable, str(PATCHER.with_name("apply_relative_patch.py")), str(target), "--apply"])
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:
@@ -61,6 +62,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_scalar_base_global_access_lowers"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "packed_byte_dot_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "packed_half_dot_lowering"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "local_relative_index_bounds_are_conservative"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_compare_exchange_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "positive_mask_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "snapshot_reservation_tests"], target)
