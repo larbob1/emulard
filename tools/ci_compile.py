@@ -56,6 +56,7 @@ def main():
             ]
             if args.lighting_memory:
                 suites.append(("Fault bitmap decoding", "victory-gpu", "fault_bitmap_tests"))
+                suites.append(("Scoped feedback completion", "victory-gpu", "scoped_fault_bitmap_tests"))
             for label, package, name in suites:
                 run_stage(label, ["cargo", "test", "--locked", "-p", package, "--lib", name], target)
             run_stage("Release runtime compilation", ["cargo", "build", "--locked", "--release", "-p", "victory"], target)

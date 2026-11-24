@@ -23,6 +23,8 @@ class FaultBitmapTests(unittest.TestCase):
             result = transform(data, edits).decode()
             for _, after in edits:
                 self.assertIn(after, result)
+                if not after:
+                    self.assertNotIn(_, result)
 
     def test_missing_anchor(self):
         for _, _, edits in SPECS:

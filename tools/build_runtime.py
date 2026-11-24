@@ -43,6 +43,7 @@ def main():
         if ns.build:
             if ns.lighting_memory:
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "fault_bitmap_tests"], target)
+                run(["cargo", "test", "--locked", "-p", "victory-gpu", "scoped_fault_bitmap_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "query_range_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "scratch_limit_tests"], target)
