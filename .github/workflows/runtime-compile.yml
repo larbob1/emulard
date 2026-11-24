@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: runtime-compile-${{ github.ref }}
-  cancel-in-progress: true
+  group: runtime-compile-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   compile:
