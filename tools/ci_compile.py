@@ -20,8 +20,14 @@ def run_stage(label, args, cwd):
         if result.returncode:
             output.seek(0)
             codes = set()
+            preparation = set()
             for line in output:
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
+                if label == "Pinned source preparation":
+                    for name in re.findall(rb"apply_[a-z_]+\.py", line):
+                        preparation.add(name.decode("ascii"))
+            if preparation:
+                print("Preparation scripts mentioned: " + ", ".join(sorted(preparation)))
             if codes:
                 print("Rust diagnostics: " + ", ".join(code.decode("ascii") for code in sorted(codes)))
             print(f"Failed: {label} (exit {result.returncode})", flush=True)

@@ -14,9 +14,13 @@ class PatcherTests(unittest.TestCase):
     def test_host_edit(self):
         lines = [f"line{i}\n" for i in range(1, 6500)]
         lines[4867:4869] = ["                *n += len;\n", "                return;\n"]
+        anchor = candidate.HOST_ATOMIC_EDIT[0].splitlines(keepends=True)
+        anchor[-1] += "\n"
+        lines[579:581] = anchor
         src = "".join(lines).encode()
         with patch.dict(candidate.EXPECTED, {candidate.HOST: candidate.blob_hash(src)}):
             result = candidate.patch_source(candidate.HOST, src).decode()
+        self.assertIn("set_host_heap_atomic64(atomic64)", result)
         self.assertIn("line1592\n    raw_copy_progress:", result)
         self.assertIn("line1604\n#[derive(Default)]", result)
         self.assertIn("line5053\n    /// Track", result)

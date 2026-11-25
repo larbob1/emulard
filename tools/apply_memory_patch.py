@@ -19,6 +19,8 @@ SCHEDULE = "    let (read_from, write_from, first_read) = list.raw_copy_schedule
 def blob_hash(data):
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
+HOST_ATOMIC_EDIT = ["        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())","        // SM 6.6 and Int64ShaderOps alone do not guarantee heap atomics.\n        let mut model = D3D12_FEATURE_DATA_SHADER_MODEL {\n            HighestShaderModel: D3D_SHADER_MODEL_6_6,\n        };\n        let mut o11 = D3D12_FEATURE_DATA_D3D12_OPTIONS11::default();\n        let atomic64 = o1.Int64ShaderOps.as_bool()\n            && device.CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,\n                (&raw mut model).cast(), size_of_val(&model) as u32).is_ok()\n            && model.HighestShaderModel.0 >= D3D_SHADER_MODEL_6_6.0\n            && device.CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11,\n                (&raw mut o11).cast(), size_of_val(&o11) as u32).is_ok()\n            && o11.AtomicInt64OnDescriptorHeapResourceSupported.as_bool();\n        victory_shader::emit::set_host_heap_atomic64(atomic64);\n        tracing::info!(atomic64, \"host descriptor-heap 64-bit atomics\");\n        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())"]
+
 def patch_source(path, data):
     normalized = data.replace(b"\r\n", b"\n")
     if blob_hash(normalized) != EXPECTED[path]:
@@ -52,7 +54,7 @@ def patch_source(path, data):
         del lines[259]
     source = "".join(lines)
     if path == HOST:
-        before, after = ["        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())","        // SM 6.6 and Int64ShaderOps alone do not guarantee heap atomics.\n        let mut model = D3D12_FEATURE_DATA_SHADER_MODEL {\n            HighestShaderModel: D3D_SHADER_MODEL_6_6,\n        };\n        let mut o11 = D3D12_FEATURE_DATA_D3D12_OPTIONS11::default();\n        let atomic64 = o1.Int64ShaderOps.as_bool()\n            && device.CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,\n                (&raw mut model).cast(), size_of_val(&model) as u32).is_ok()\n            && model.HighestShaderModel.0 >= D3D_SHADER_MODEL_6_6.0\n            && device.CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11,\n                (&raw mut o11).cast(), size_of_val(&o11) as u32).is_ok()\n            && o11.AtomicInt64OnDescriptorHeapResourceSupported.as_bool();\n        victory_shader::emit::set_host_heap_atomic64(atomic64);\n        tracing::info!(atomic64, \"host descriptor-heap 64-bit atomics\");\n        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())"]
+        before, after = HOST_ATOMIC_EDIT
         if source.count(before) != 1:
             raise ValueError("Host atomic capability anchor differs.")
         source = source.replace(before, after)
