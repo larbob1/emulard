@@ -55,6 +55,7 @@ def main():
                 ("Host wave cache key", "victory-gpu", "wave_cache_key_tests"),
                 ("Raw scalar-base addressing", "victory-shader", "raw_scalar_base_global_access_lowers"),
                 ("Packed-byte dot lowering", "victory-shader", "packed_byte_dot_lowering"),
+                ("Signed wide multiply-add result", "victory-shader", "signed_mad_result_lowering"),
                 ("Accumulating byte dot lowering", "victory-shader", "accumulating_byte_dot_lowering"),
                 ("Accumulator operand tracking", "victory-shader", "accumulating_dot_reads_its_destination_as_an_operand"),
                 ("Ray directory translation", "victory-shader", "a_descriptor_of_numbers_is_title_memory_read_through_the_directory"),

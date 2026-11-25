@@ -1,6 +1,6 @@
 # First launch readiness
 
-The recommended initial source candidate is commit 99c2a13086c036993ee20c9891d326eb1c6b59e6. Both Windows runtime compile jobs passed for that revision. This is compilation evidence, not gameplay or Linux compatibility evidence. Newer candidates should remain isolated until their own build and GPU checks succeed.
+The recommended initial source candidate is commit 71c8936e8cc280a42cdfac2882dfcae3e6313862. Both Windows runtime compile jobs passed for that revision. [Verified runtime workflow](https://github.com/larbob1/emulard/actions/runs/45515044086). This is compilation evidence, not gameplay or Linux compatibility evidence. Newer candidates should remain isolated until their own build and GPU checks succeed.
 
 ## Start with synthetic probes
 
@@ -18,7 +18,7 @@ The second command deliberately returns an incomplete status until a locally bui
 In a separate clone of this repository, check out the recommended commit, then prepare a fresh external runtime checkout:
 
 ```sh
-git switch --detach 99c2a13086c036993ee20c9891d326eb1c6b59e6
+git switch --detach 71c8936e8cc280a42cdfac2882dfcae3e6313862
 python3 tools/build_runtime.py ../runtime-first-test
 ```
 
@@ -34,7 +34,7 @@ After a successful local build, run the smoke checks with the executable supplie
 python3 tools/first_launch.py /path/to/probe-directory --runtime /path/to/locally-built.exe
 ```
 
-Only proceed to authorized local software testing after the smoke checks pass. Keep the structure-builder opt-in, wave-wide experiments, and optional lighting memory patches off for the initial baseline test. Do not infer correct rendering from a successful version check. No title assets, keys, packages, private reports, or full runtime binaries are distributed in this repository.
+Only proceed to authorized local software testing after the smoke checks pass. Keep the structure-builder opt-in, wave-wide experiments, and optional lighting memory patches off for the initial baseline test. Record the first failure stage locally before changing settings. If the runtime starts, compare numerical frame summaries for the same scene, including dropped draws. Do not report playability based on a version check or successful compilation. Do not infer correct rendering from a successful version check. No title assets, keys, packages, private reports, or full runtime binaries are distributed in this repository.
 
 ## What remains unverified
 

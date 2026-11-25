@@ -19,7 +19,7 @@ These projects are read-only. The latter two are references, not merged runtimes
 | Source preparation and synthetic probes | Implemented |
 | Memory scheduling, query bounds and wave retry | Experimental source patches |
 | Builder pipeline preparation and memory budgets | Experimental source patches |
-| Full Windows runtime compilation | CI validation pending |
+| Full Windows runtime compilation | Both configurations passed at 71c8936; newer candidates pending |
 | Lighting and stable world rendering | Unresolved |
 | Linux compatibility and performance | Unverified |
 
@@ -49,7 +49,7 @@ See [cross-project GPU memory review](docs/gpu-memory-integration.md) for the ra
 
 10 FPS means at most 100 ms per frame. The fastest upstream reported world intervals are about 240–350 ms on another machine. Reducing copies, waits and compilation stalls while preserving correct rendering is the initial objective. No performance result for Emulard has been established.
 
-The numeric frame report tool summarizes existing local telemetry without printing raw log lines:
+The numeric frame report tool summarizes existing local telemetry without printing raw log lines. To compare matching scenes and settings, add `--baseline /path/to/baseline.log`:
 
 ```sh
 python3 tools/frame_report.py /path/to/local.log --skip 5

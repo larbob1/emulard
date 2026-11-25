@@ -63,6 +63,7 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "wave_cache_key_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "raw_scalar_base_global_access_lowers"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "packed_byte_dot_lowering"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-shader", "signed_mad_result_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "accumulating_byte_dot_lowering"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "accumulating_dot_reads_its_destination_as_an_operand"], target)
             run(["cargo", "test", "--locked", "-p", "victory-shader", "a_descriptor_of_numbers_is_title_memory_read_through_the_directory"], target)
