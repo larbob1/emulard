@@ -19,7 +19,7 @@ These projects are read-only. The latter two are references, not merged runtimes
 | Source preparation and synthetic probes | Implemented |
 | Memory scheduling, query bounds and wave retry | Experimental source patches |
 | Builder pipeline preparation and memory budgets | Experimental source patches |
-| Full Windows runtime compilation | Both configurations passed at 71c8936; newer candidates pending |
+| Full Windows runtime compilation | Both configurations passed at b5b6446; newer candidates pending |
 | Lighting and stable world rendering | Unresolved |
 | Linux compatibility and performance | Unverified |
 

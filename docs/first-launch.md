@@ -1,6 +1,6 @@
 # First launch readiness
 
-The recommended initial source candidate is commit 71c8936e8cc280a42cdfac2882dfcae3e6313862. Both Windows runtime compile jobs passed for that revision. [Verified runtime workflow](https://github.com/larbob1/emulard/actions/runs/45515044086). This is compilation evidence, not gameplay or Linux compatibility evidence. Newer candidates should remain isolated until their own build and GPU checks succeed.
+The recommended initial source candidate is commit b5b644696cc6119fc4530a2d029ff7eda6162366. Both Windows runtime compile jobs passed for that revision. [Verified runtime workflow](https://github.com/larbob1/emulard/actions/runs/45517064245). This is compilation evidence, not gameplay or Linux compatibility evidence. Newer candidates should remain isolated until their own build and GPU checks succeed.
 
 ## Start with synthetic probes
 
@@ -18,15 +18,17 @@ The second command deliberately returns an incomplete status until a locally bui
 In a separate clone of this repository, check out the recommended commit, then prepare a fresh external runtime checkout:
 
 ```sh
-git switch --detach 71c8936e8cc280a42cdfac2882dfcae3e6313862
+git switch --detach b5b644696cc6119fc4530a2d029ff7eda6162366
 python3 tools/build_runtime.py ../runtime-first-test
 ```
 
 On a Windows build host, use --build during preparation instead. For an experimental Linux cross-build, return to the current Emulard checkout and use the new cross-build helper with that prepared runtime checkout. It requires a configured Rust toolchain, cargo-xwin, Clang, LLD and Windows SDK support. It may download normal build dependencies and SDK files through the build tools. It is not yet verified on Linux; no system packages are installed by the helper.
 
 ```sh
-python3 tools/cross_build.py /path/to/runtime-first-test
+python3 tools/cross_build.py /path/to/runtime-first-test --jobs 2
 ```
+
+The current cross-build helper also accepts `--diagnostics` to build the diagnostic profile, with the binary under `target/x86_64-pc-windows-msvc/diag/victory.exe`. The release executable is under `target/x86_64-pc-windows-msvc/release/victory.exe`. Both commands use an explicit target directory and limit Cargo concurrency to two jobs by default; this is not a total RAM cap. Do not build both profiles unless needed. The optional `--wine` argument to first_launch.py selects the same trusted Wine executable that will be used for testing.
 
 After a successful local build, run the smoke checks with the executable supplied using --runtime. The Windows native build and the cross-build use different Cargo output directories; select the actual binary from the relevant build.
 
@@ -49,3 +51,9 @@ python3 tools/readiness_report.py /path/to/local.log --skip 5
 ```
 
 The report summarizes known shader refusal categories, observed builder readiness and disable events, raw memory fault messages and frame interval medians. It never emits raw diagnostic messages, shader hashes or addresses. It cannot establish that unlogged problems are absent. Pipeline readiness is not evidence of correct structures, shadows or lighting. Share only the reviewed numerical summary if troubleshooting; do not publish raw logs. No runtime launch is performed by this helper.
+
+## Baseline-first execution policy
+
+Use the compile-verified source candidate above before attempting optional rendering features. Check the runtime's `run --help` output using the same Wine executable. The CLI distinguishes preparing and binding a lawfully available local executable from running it with the explicit execution option. First test binding alone, with the default unsupported-import trap behavior retained. Do not bypass missing imports, turn on unproven wave-wide barriers, or enable partial builder execution just to get more frames. Keep runtime logs local. Only the numerical readiness summary should be considered for sharing after review.
+
+Build results establish source compilation on Windows, not Wine support. A cross-build error or a failed graphics capability probe is a blocker to investigate, not a gameplay failure. No runtime binary or program data is added here.

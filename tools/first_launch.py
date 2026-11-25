@@ -42,10 +42,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("probe_dir", type=Path, help="directory containing trusted synthetic probes")
     parser.add_argument("--runtime", type=Path, help="locally built executable; runs only --version")
+    parser.add_argument("--wine", default="wine", help="trusted Wine executable or executable path")
     args = parser.parse_args()
     if not sys.platform.startswith("linux"):
         parser.error("Use on a Linux host.")
-    wine = shutil.which("wine")
+    wine = shutil.which(args.wine)
     if not wine:
         print(json.dumps({"wine": "not-found", "status": "blocked"}))
         return 1
