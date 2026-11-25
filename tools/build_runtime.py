@@ -50,8 +50,8 @@ def main():
         run(heap, target)
         run([sys.executable, str(PATCHER.with_name("apply_relative_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_iterative_bool_patch.py")), str(target), "--apply"])
+        run(["git", "apply", str(own / "patches" / "predicate-iterative.patch")], target)
         run([sys.executable, str(PATCHER.with_name("apply_divergent_wave_retry_patch.py")), str(target), "--apply"])
-        run([sys.executable, str(PATCHER.with_name("apply_predicate_search_budget_patch.py")), str(target), "--apply"])
         run(["git", "apply", str(own / "patches" / "presentx-multiplane.patch")], target)
         run(["git", "diff", "--check"], target)
         if ns.build:
