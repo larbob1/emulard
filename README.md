@@ -14,14 +14,34 @@ These projects are read-only. The latter two are references, not merged runtimes
 
 ## Status
 
+This is a source-only development branch. Implemented means source lowering or integration exists, not verified gameplay.
+
 | Area | State |
 | --- | --- |
 | Source preparation and synthetic probes | Implemented |
-| Memory scheduling, query bounds and wave retry | Experimental source patches |
-| Builder pipeline preparation and memory budgets | Experimental source patches |
-| Full Windows runtime compilation | Both configurations passed at b5b6446; newer candidates pending |
-| Lighting and stable world rendering | Unresolved |
-| Linux compatibility and performance | Unverified |
+| Shader integer arithmetic and packed raw-address loads/stores | Expanded; latest compilation pending |
+| 32-bit global and buffer atomics | Expanded with wrap counters, conditional subtraction, compare-exchange and buffer float min/max candidates |
+| LDS shared-memory atomics | Expanded with reverse subtraction, bounded counters and mask-or, including returning variants |
+| Wave64 translation | Partial; divergent cross-wave behavior remains unresolved |
+| Dynamic BVH | Partial; all-or-none pipeline gate retained |
+| Shadow-mask and ray-traced lighting | Unresolved; actual shader rejection diagnostics needed |
+| GPU residency, fault recovery and dirty-page writeback | Partial; dirty filtering not activated |
+| RAM and VRAM budgets | Experimental source patches |
+| Full Windows runtime compilation | Both configurations passed at b5b6446; latest candidates not compile-verified |
+| Linux/CachyOS runtime and gameplay | Unverified |
+| 10 FPS target | Unverified |
+
+### Remaining work
+
+- Complete 64-bit atomics with real host atomic support and shader-model capability checks; do not split atomic 64-bit updates into independent 32-bit writes.
+- Complete unsupported scalar-memory atomics, floating compare-swap and remaining LDS operations. Verify floating atomic NaN, signed-zero, denormal and rounding behavior.
+- Expand packed 16-bit arithmetic, double-precision arithmetic and exact Wave64 support.
+- Identify missing shadow-mask and builder shader instructions from local diagnostics; validate dynamic BVH output before normal writeback.
+- Complete GPU memory fault recovery, submission replay and conservative dirty-page writeback filtering.
+- Reduce memory overhead, resolve build failures and validate first launch on CachyOS.
+- Measure correct rendering and sustained frame times on hardware before claiming playability or performance.
+
+Latest atomic candidate: [74a4231](https://github.com/larbob1/emulard/commit/74a4231757696def3f822e7f84b8fc7216fb80ab). Both source compositions were checked against the pinned source. This is not a successful Rust build or GPU test. The BVH safety gate remains enabled.
 
 ## First launch
 
