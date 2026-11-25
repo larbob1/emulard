@@ -65,6 +65,7 @@ def main():
                 ("Positive wave mask proof", "victory-shader", "positive_mask_tests"),
                 ("Wave tail layout", "victory-shader", "wave_tail_tests"),
                 ("Unpaired host wave lowering", "victory-shader", "unpaired_host_wave_lowers_without_partner"),
+                ("Split-wave backward permute", "victory-shader", "split_wave_backward_permute_lowers"),
                 ("Snapshot budget reservation", "victory-gpu", "snapshot_reservation_tests"),
                 ("Idle snapshot pool limit", "victory-gpu", "idle_snapshot_pool_tests"),
                 ("Snapshot coverage and retirement", "victory-gpu", "snapshot_coverage_tests"),

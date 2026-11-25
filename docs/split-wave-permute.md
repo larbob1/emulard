@@ -1,0 +1,7 @@
+# Split-wave backward permutation
+
+The pinned baseline refuses ds_bpermute_b32 whenever a logical Wave64 spans two host waves. Its upstream notes identify backward permutations as useful to shadow-mask shaders. This candidate implements the converged gather using one extra shared dword per logical thread, allocated only for a shader requiring this operation. All threads publish their source value (zero for a guarded-off lane), rendezvous, gather within their own logical console wave, and rendezvous again before scratch reuse. A source lane beyond the end of the group reads a safe initialized location and returns zero. The existing shared-memory capacity guard includes this scratch.
+
+The candidate requires the new group-uniform acyclic control proof and the existing all-lane check. It refuses local approximate wave mode, non-converged branches and unsupported group layouts. This is a narrow compute-shader path, not a complete cross-lane or divergent-control implementation. It does not implement forward permutation or claim that the actual shadow-mask programs now run.
+
+A synthetic lowering regression covers groups of 64, 96 and 128 threads, including a partial final console wave. It validates DXIL when the validator is available; it does not execute the shader or compare GPU results. The exact pinned source anchors were verified in both runtime compositions. The last complete runtime compilation passed at a889da8; the newest group-proof revision passed synthetic checks and is awaiting full runtime validation. No hardware performance is claimed.
