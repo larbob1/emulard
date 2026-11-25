@@ -39,6 +39,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_lighting_patch.py")), str(target), "--apply", "--scalar-only"])
         run([sys.executable, str(PATCHER.with_name("apply_wave_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_builder_patch.py")), str(target), "--apply"])
+        run([sys.executable, str(PATCHER.with_name("apply_pipeline_stack_patch.py")), str(target), "--apply"])
         dot = [sys.executable, str(PATCHER.with_name("apply_dot_patch.py")), str(target), "--apply"]
         if ns.lighting_memory:
             dot.append("--lighting-memory")
@@ -48,6 +49,10 @@ def main():
             heap.append("--lighting-memory")
         run(heap, target)
         run([sys.executable, str(PATCHER.with_name("apply_relative_patch.py")), str(target), "--apply"])
+        run([sys.executable, str(PATCHER.with_name("apply_iterative_bool_patch.py")), str(target), "--apply"])
+        run([sys.executable, str(PATCHER.with_name("apply_divergent_wave_retry_patch.py")), str(target), "--apply"])
+        run([sys.executable, str(PATCHER.with_name("apply_predicate_search_budget_patch.py")), str(target), "--apply"])
+        run(["git", "apply", str(own / "patches" / "presentx-multiplane.patch")], target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:

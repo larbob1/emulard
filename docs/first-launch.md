@@ -38,9 +38,45 @@ python3 tools/first_launch.py /path/to/probe-directory --runtime /path/to/locall
 
 Only proceed to authorized local software testing after the smoke checks pass. Keep the structure-builder opt-in, wave-wide experiments, and optional lighting memory patches off for the initial baseline test. Record the first failure stage locally before changing settings. If the runtime starts, compare numerical frame summaries for the same scene, including dropped draws. Do not report playability based on a version check or successful compilation. Do not infer correct rendering from a successful version check. No title assets, keys, packages, private reports, or full runtime binaries are distributed in this repository.
 
+## Launching from the package drive under Wine
+
+After the smoke checks pass, use a dedicated, initialized Wine prefix with
+the same D3D12 setup used by the graphics probe.
+
+```sh
+WINEPREFIX=/path/to/prefix bash tools/run_wine.sh /path/to/victory.exe /path/to/package/title.exe
+```
+
+The launcher maps the title folder as `G:` and starts Victory from that
+folder. This lets drive-rooted paths such as `\appdata0.rpf` reach the
+package even when title code calls Windows directly. The mapping persists
+in this prefix. The launcher refuses to replace an existing mapping to
+another folder. Set `WINE` if the smoke checks used a custom Wine executable.
+
+For the local title tested on Linux, select the Series S profile:
+
+```sh
+WINEPREFIX=/path/to/prefix bash tools/run_wine.sh \
+    /path/to/victory.exe /path/to/package/title.exe --console series-s
+```
+
+With this title, system Wine reached graphics initialization in Series S
+but later raised the same breakpoint as Series X. An initialized Proton
+Experimental prefix under Steam Linux Runtime 4 passed that point in
+Series S. To use Proton, set `WINEPREFIX` to the initialized
+`compatdata/pfx` directory and set `WINE` to an executable adapter that
+forwards its arguments to Proton’s `runinprefix` command.
+
+Emulard's runtime preparation applies the multi-plane PresentX compositor
+adapted from [Yaekai's VIctory change](https://github.com/Marvisak/VIctory/pull/211)
+and its root-signature and command-list recovery follow-ups. A Series S
+title can submit the scene and interface as separate textures. The
+compositor blends the interface over the scene and preserves the
+single-plane copy path.
+
 ## What remains unverified
 
-Wine runtime compatibility, graphics execution, full-world rendering, memory use and frame rate. The existing Windows CI result does not establish that the Linux cross-build works. No unsupported graphics fallback is enabled by these tools.
+Full title compatibility under Wine, full-world rendering, memory use and sustained gameplay frame rate. The existing Windows CI result does not establish that the Linux cross-build works. No unsupported graphics fallback is enabled by these tools.
 
 ## Numeric readiness report
 

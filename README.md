@@ -1,82 +1,90 @@
-# Emulard
+# Emulard compatibility baseline
 
-Experimental x86-64 console compatibility-layer development. **Not a standalone emulator or a playable release.** The project builds on public upstream implementations instead of rewriting working components.
+Emulard is an experimental x86-64 console compatibility-layer development
+project. This branch packages and patches the read-only [VIctory fork](https://github.com/fxceless/victory-fork)
+runtime. It is for local development and compatibility research; it is not a
+standalone emulator or a playable release.
 
-[Build and test status](https://github.com/larbob1/emulard/actions)
+## Current status
 
-## Architecture and reuse
+The runtime builds for the Windows target and launches under Proton on Linux.
+The latest local diagnostic run advanced beyond startup and submitted over
+2,000 frames before its 260-second timeout. This confirms launch and GPU work,
+not correct rendering or playable gameplay.
 
-- [Victory Fork](https://github.com/fxceless/victory-fork): pinned runtime baseline; loader, system shims, graphics translation, shader compiler, input, audio, streaming, caching and existing ray-intersection implementation are retained.
-- [VIctory](https://github.com/Marvisak/VIctory): upstream/reference for improved shader coverage, ahead-of-time pipeline preparation, and synthetic GPU memory tests.
-- [Five Star Recomp](https://github.com/ThatRecompDev/five-star-recomp): independent reference for shader compiler behavior, memory-aware pipeline compilation, and synthetic tests.
+This branch includes:
 
-These projects are read-only. The latter two are references, not merged runtimes. See [integration notes](docs/upstream-integration.md) for pinned revisions and boundaries.
+- A multi-plane PresentX compositor for combining scene and interface output.
+- A Wine launcher that maps the supplied title directory to `G:` for
+  drive-rooted file access.
+- A larger pipeline-worker stack and iterative boolean shader lowering to
+  avoid stack overflows.
+- Conservative shader retry and predicate-search limits for split-wave
+  translation.
 
-## Status
+### Known blockers
 
-This is a source-only development branch. Implemented means source lowering or integration exists, not verified gameplay.
+- Some compute shaders still fail translation. One needs synchronization
+  across divergent waves in a 256-thread group; another uses an unsupported
+  waterfall loop. Those draws are dropped.
+- Several host GPU pipelines are refused, and intermittent black frames are
+  reported.
+- The full run did not reach verified gameplay. Rendering correctness,
+  controls in gameplay, stability, memory use and sustained frame rate remain
+  unverified.
 
-| Area | State |
-| --- | --- |
-| Source preparation and synthetic probes | Implemented |
-| Shader integer arithmetic and packed raw-address loads/stores | Expanded; latest compilation pending |
-| 32-bit global and buffer atomics | Expanded with wrap counters, conditional subtraction, compare-exchange and buffer float min/max candidates |
-| LDS shared-memory atomics | Expanded with reverse subtraction, bounded counters and mask-or, including returning variants |
-| Wave64 translation | Partial; divergent cross-wave behavior remains unresolved |
-| Dynamic BVH | Partial; all-or-none pipeline gate retained |
-| Shadow-mask and ray-traced lighting | Unresolved; actual shader rejection diagnostics needed |
-| GPU residency, fault recovery and dirty-page writeback | Partial; dirty filtering not activated |
-| RAM and VRAM budgets | Experimental source patches |
-| Full Windows runtime compilation | Both configurations passed at b5b6446; latest candidates not compile-verified |
-| Linux/CachyOS runtime and gameplay | Unverified |
-| 10 FPS target | Unverified |
+The wave changes keep safety checks enabled. Do not force a group barrier or
+approximate divergent-wave result to make a shader appear to translate; that
+can deadlock or produce incorrect output.
 
-### Remaining work
+## Prepare and build
 
-- Complete 64-bit atomics with real host atomic support and shader-model capability checks; do not split atomic 64-bit updates into independent 32-bit writes.
-- Complete unsupported scalar-memory atomics, floating compare-swap and remaining LDS operations. Verify floating atomic NaN, signed-zero, denormal and rounding behavior.
-- Expand packed 16-bit arithmetic, double-precision arithmetic and exact Wave64 support.
-- Identify missing shadow-mask and builder shader instructions from local diagnostics; validate dynamic BVH output before normal writeback.
-- Complete GPU memory fault recovery, submission replay and conservative dirty-page writeback filtering.
-- Reduce memory overhead, resolve build failures and validate first launch on CachyOS.
-- Measure correct rendering and sustained frame times on hardware before claiming playability or performance.
-
-Latest atomic candidate: [74a4231](https://github.com/larbob1/emulard/commit/74a4231757696def3f822e7f84b8fc7216fb80ab). Both source compositions were checked against the pinned source. This is not a successful Rust build or GPU test. The BVH safety gate remains enabled.
-
-## First launch
-
-See [first launch readiness](docs/first-launch.md) for the recommended CI-compiled source revision, optional local cross-build and synthetic Wine checks. No playable build has been established.
-
-## Local development
-
-Prerequisites for full runtime compilation: Windows x64, the upstream pinned Rust toolchain, a recent Windows SDK and build tools. GPU testing additionally requires D3D12 Shader Model 6.6 and mesh shaders. Linux is supported for the local diagnostics and synthetic native probes; runtime execution through a compatibility layer is unverified.
+Create a fresh runtime checkout outside this repository. The preparation
+script pins the Victory fork revision and applies Emulard's source patches.
+It disables pushes from the runtime checkout.
 
 ```sh
-python3 -m unittest discover -s tools -p 'test_*.py'
-bash tools/preflight.sh
-python3 tools/build_runtime.py ../runtime-baseline
+python3 tools/build_runtime.py ../runtime-emulard
 ```
 
-Use a new directory outside this repository for each source preparation. Add --build on a Windows build host; add --lighting-memory for the independent page-boundary experiment. The source preparation script disables upstream pushes.
-
-See [runtime compilation](docs/runtime-compile.md), [runtime bring-up](docs/runtime-bringup.md), and [lighting development](docs/lighting-memory.md).
-
-## GPU memory integration
-
-See [cross-project GPU memory review](docs/gpu-memory-integration.md) for the raw scalar-base address candidate and remaining dirty-page integration work.
-
-## Performance target
-
-10 FPS means at most 100 ms per frame. The fastest upstream reported world intervals are about 240–350 ms on another machine. Reducing copies, waits and compilation stalls while preserving correct rendering is the initial objective. No performance result for Emulard has been established.
-
-The numeric frame report tool summarizes existing local telemetry without printing raw log lines. To compare matching scenes and settings, add `--baseline /path/to/baseline.log`:
+On a Windows build host, add `--build` to run the configured shader/GPU checks
+and build the release and diagnostic runtimes:
 
 ```sh
-python3 tools/frame_report.py /path/to/local.log --skip 5
+python3 tools/build_runtime.py ../runtime-emulard --build
 ```
 
-Only compare like-for-like scene intervals and check for dropped draws. Aggregate interval medians are not per-frame percentiles.
+For Linux cross-compilation, use the separate cross-build workflow described
+in [first-launch readiness](docs/first-launch.md). Linux runtime execution is
+experimental and requires a configured Wine or Proton environment with
+D3D12 support.
 
-## Privacy and licensing
+## Launch under Wine
 
-Do not commit proprietary assets, executables, credentials, local paths, hardware identifiers, or raw diagnostic reports. Upstream source and licensing notices remain in their separate checkouts. The project patch scripts and original regression code are provided under GPL-3.0-or-later. See the upstream licenses for upstream components. Source and patch tools only; no commercial content is provided.
+Use a dedicated, initialized prefix and a locally built runtime. The helper
+maps the title folder as `G:` and refuses to replace an existing mapping to a
+different folder.
+
+```sh
+WINEPREFIX=/path/to/prefix \
+  bash tools/run_wine.sh /path/to/victory.exe /path/to/title.exe --console series-s
+```
+
+Set `WINE` to a wrapper for the selected Wine or Proton installation when the
+default `wine` command is not the one used to initialize the prefix. See
+[first-launch readiness](docs/first-launch.md) for smoke checks and Proton
+setup notes.
+
+## Development notes
+
+- Treat repositories referenced by the preparation and patch scripts as
+  read-only source material. Make Emulard changes in this repository's
+  patchers and integration code.
+- Keep game data, keys, executables, local paths, credentials and raw runtime
+  logs out of commits. Share reviewed summaries instead of raw diagnostics.
+- Compilation and frame progress do not establish playability. Record shader
+  refusals and dropped draws when evaluating a change.
+
+See [runtime compilation](docs/runtime-compile.md),
+[runtime bring-up](docs/runtime-bringup.md), and
+[first-launch readiness](docs/first-launch.md) for detailed workflows.
