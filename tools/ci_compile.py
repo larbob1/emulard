@@ -21,13 +21,24 @@ def run_stage(label, args, cwd):
             output.seek(0)
             codes = set()
             preparation = set()
+            unresolved = set()
+            locations = set()
             for line in output:
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
+                if b"error[E0425]" in line:
+                    unresolved.update(re.findall(rb"\x60([A-Za-z_][A-Za-z_0-9]*)\x60", line))
+                location = re.search(rb"--> (crates[\\/][A-Za-z0-9_-]+[\\/]src[\\/][A-Za-z0-9_\\/.-]+\.rs):([0-9]+):([0-9]+)", line)
+                if location:
+                    locations.add(b":".join(location.groups()).replace(b"\\", b"/"))
                 if label == "Pinned source preparation":
                     for name in re.findall(rb"apply_[a-z_]+\.py", line):
                         preparation.add(name.decode("ascii"))
             if preparation:
                 print("Preparation scripts mentioned: " + ", ".join(sorted(preparation)))
+            if unresolved:
+                print("Unresolved identifiers: " + ", ".join(x.decode("ascii") for x in sorted(unresolved)))
+            if locations:
+                print("Diagnostic locations: " + ", ".join(x.decode("ascii") for x in sorted(locations)))
             if codes:
                 print("Rust diagnostics: " + ", ".join(code.decode("ascii") for code in sorted(codes)))
             print(f"Failed: {label} (exit {result.returncode})", flush=True)
