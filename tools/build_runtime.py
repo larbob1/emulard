@@ -53,6 +53,7 @@ def main():
             if ns.lighting_memory:
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "fault_bitmap_tests"], target)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "fault_recovery_batch_tests"], target)
+                run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_retry_tests"], target)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "scoped_fault_bitmap_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "raw_copy_progress_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "directory_range_tests"], target)
