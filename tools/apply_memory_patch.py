@@ -50,7 +50,13 @@ def patch_source(path, data):
     else:
         lines[292:309] = [SCHEDULE]
         del lines[259]
-    updated = "".join(lines).encode("utf-8")
+    source = "".join(lines)
+    if path == HOST:
+        before, after = ["        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())","        // SM 6.6 and Int64ShaderOps alone do not guarantee heap atomics.\n        let mut model = D3D12_FEATURE_DATA_SHADER_MODEL {\n            HighestShaderModel: D3D_SHADER_MODEL_6_6,\n        };\n        let mut o11 = D3D12_FEATURE_DATA_D3D12_OPTIONS11::default();\n        let atomic64 = o1.Int64ShaderOps.as_bool()\n            && device.CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,\n                (&raw mut model).cast(), size_of_val(&model) as u32).is_ok()\n            && model.HighestShaderModel.0 >= D3D_SHADER_MODEL_6_6.0\n            && device.CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11,\n                (&raw mut o11).cast(), size_of_val(&o11) as u32).is_ok()\n            && o11.AtomicInt64OnDescriptorHeapResourceSupported.as_bool();\n        victory_shader::emit::set_host_heap_atomic64(atomic64);\n        tracing::info!(atomic64, \"host descriptor-heap 64-bit atomics\");\n        let messages = debug\n            .then(|| device.cast::<ID3D12InfoQueue>().ok())"]
+        if source.count(before) != 1:
+            raise ValueError("Host atomic capability anchor differs.")
+        source = source.replace(before, after)
+    updated = source.encode("utf-8")
     return updated.replace(b"\n", b"\r\n") if b"\r\n" in data else updated
 
 # Applied after the memory scheduling edits because both target host.rs.
