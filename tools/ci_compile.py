@@ -54,6 +54,11 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="emulard-ci-") as directory:
             target = Path(directory) / "runtime"
+            run_stage(
+                "Pipeline worker stack patch",
+                [sys.executable, "test_apply_pipeline_stack_patch.py"],
+                ROOT / "tools",
+            )
             prepare = [sys.executable, str(ROOT / "tools" / "build_runtime.py"), str(target)]
             if args.lighting_memory:
                 prepare.append("--lighting-memory")

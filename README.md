@@ -17,8 +17,8 @@ This branch includes:
 - A multi-plane PresentX compositor for combining scene and interface output.
 - A Wine launcher that maps the supplied title directory to `G:` for
   drive-rooted file access.
-- A larger pipeline-worker stack and iterative boolean shader lowering to
-  avoid stack overflows.
+- A 32 MiB pipeline-worker stack and iterative boolean shader lowering to
+  avoid stack overflows on large shaders.
 - Conservative shader retry and predicate-search limits for split-wave
   translation.
 
