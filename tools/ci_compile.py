@@ -66,6 +66,7 @@ def main():
                 ("Unpaired host wave lowering", "victory-shader", "unpaired_host_wave_lowers_without_partner"),
                 ("Snapshot budget reservation", "victory-gpu", "snapshot_reservation_tests"),
                 ("Idle snapshot pool limit", "victory-gpu", "idle_snapshot_pool_tests"),
+                ("Snapshot coverage and retirement", "victory-gpu", "snapshot_coverage_tests"),
                 ("Ray intersection reference", "victory-shader", "bvh::tests::"),
             ]
             if args.lighting_memory:
