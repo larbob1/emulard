@@ -39,3 +39,13 @@ Only proceed to authorized local software testing after the smoke checks pass. K
 ## What remains unverified
 
 Wine runtime compatibility, graphics execution, full-world rendering, memory use and frame rate. The existing Windows CI result does not establish that the Linux cross-build works. No unsupported graphics fallback is enabled by these tools.
+
+## Numeric readiness report
+
+For a local run with diagnostic logging enabled, keep the original log on your machine. From the current development checkout:
+
+```sh
+python3 tools/readiness_report.py /path/to/local.log --skip 5
+```
+
+The report summarizes known shader refusal categories, observed builder readiness and disable events, raw memory fault messages and frame interval medians. It never emits raw diagnostic messages, shader hashes or addresses. It cannot establish that unlogged problems are absent. Pipeline readiness is not evidence of correct structures, shadows or lighting. Share only the reviewed numerical summary if troubleshooting; do not publish raw logs. No runtime launch is performed by this helper.
