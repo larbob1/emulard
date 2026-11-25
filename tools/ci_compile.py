@@ -44,6 +44,7 @@ def main():
             run_stage("Pinned Rust toolchain", ["rustup", "toolchain", "install"], target)
             suites = [
                 ("Memory scheduling", "victory-gpu", "raw_copy_progress_tests"),
+                ("Raw directory bounds", "victory-gpu", "directory_range_tests"),
                 ("Query bounds", "victory-gpu", "query_range_tests"),
                 ("Idle upload pool", "victory-gpu", "scratch_limit_tests"),
                 ("Write declaration index", "victory-gpu", "write_index_tests"),
@@ -69,6 +70,7 @@ def main():
             ]
             if args.lighting_memory:
                 suites.append(("Fault bitmap decoding", "victory-gpu", "fault_bitmap_tests"))
+                suites.append(("Fault recovery batch", "victory-gpu", "fault_recovery_batch_tests"))
                 suites.append(("Scoped feedback completion", "victory-gpu", "scoped_fault_bitmap_tests"))
             for label, package, name in suites:
                 run_stage(label, ["cargo", "test", "--locked", "-p", package, "--lib", name], target)

@@ -1,0 +1,9 @@
+# Raw memory directory bounds and fault recovery
+
+The raw shader byte offset within a host copy is 32 bits. This candidate checks that the entire 64 KiB page lies within the host copy and the representable byte range, with dword alignment. Directory entries outside that range are not published, rather than truncating their offsets. The bulk mapping path uses the same check. Address arithmetic for the next candidate window is checked. The raw fault summary no longer logs a page address.
+
+The experimental feedback path receives page indices only after a completed submission. Instead of waiting for the next frame, its next raw memory preparation processes up to 256 pending pages, in ascending order. The ordered set deduplicates pages and retains the excess for subsequent passes. The per-frame rejection set is still cleared only at a new frame. The baseline global feedback behavior is unchanged. This can reduce the delay before a later dispatch sees a mapped page, but never repairs an access that already returned zero or dropped a write.
+
+Two targeted Rust tests cover directory offset bounds and bounded feedback draining. The combined baseline and experimental source transformations were checked against the pinned upstream blob. The last complete runtime validation before this revision passed at 773fd22. The immediately preceding revision passed synthetic checks; its full build was still in progress. The latest candidate requires compilation and hardware validation.
+
+The shared directory remains append-only and does not establish allocation generation, alias consistency or cross-heap publication safety. Some pages beyond the supported offset range need a redesigned mapping representation. Completed missing-page feedback does not prove that a partially executed builder is safe to commit, and no submission replay or dirty-page writeback filtering is enabled. No rendering or performance target is claimed.
