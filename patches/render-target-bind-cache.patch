@@ -1,0 +1,146 @@
+# Port of avatarmanz/VIctory-7900XTX ca1d519f18ccece3daf2b05191a43fae17ac6f91.
+# Emulard makes the cache opt-in and adds frame counters.
+
+--- a/crates/victory-gpu/src/descriptor.rs
++++ b/crates/victory-gpu/src/descriptor.rs
+@@ -353,6 +353,15 @@
+ const _: () = assert!(size_of::<RtvRecord>() <= 112);
+ 
+ impl RtvRecord {
++    /// All the view it records is made from: records with equal keys have
++    /// equal views (of the same host texture).
++    #[cfg(windows)]
++    pub(crate) fn key(&self) -> (usize, [u32; 7]) {
++        let mut words = [self.described; 7];
++        words[1..].copy_from_slice(&self.desc);
++        (self.resource as usize, words)
++    }
++
+     /// The view description in the host's type (the same layout).
+     #[cfg(windows)]
+     pub(crate) fn desc(
+--- a/crates/victory-gpu/src/draw.rs
++++ b/crates/victory-gpu/src/draw.rs
+@@ -361,6 +361,10 @@
+     target_handles: Vec<u64>,
+     depth_handle: u64,
+     targets_set: bool,
++    /// The render target views and the depth view the host list has, once
++    /// it has any ([`State::set_targets`]): per view the host texture (0:
++    /// a null view) and what its descriptor says.
++    host_targets: Option<(Vec<TargetKey>, Option<TargetKey>)>,
+     viewports: Vec<D3D12_VIEWPORT>,
+     scissors: Vec<RECT>,
+     blend: Option<[f32; 4]>,
+@@ -614,6 +618,10 @@
+     DISPATCHED.load(Ordering::Relaxed)
+ }
+ 
++/// What a render target or depth view of the host is made from: the host
++/// texture, and [`crate::descriptor::RtvRecord::key`].
++type TargetKey = (usize, (usize, [u32; 7]));
++
+ /// The host address of a root view: its buffer's host copy, or for a
+ /// constant buffer not 256-byte aligned there (the console needs 16) a
+ /// copy in upload memory.
+@@ -749,7 +757,10 @@
+         self.index = view.copied().unwrap_or_default();
+     }
+ 
+-    /// Render targets and depth, set on the host list at once.
++    /// Render targets and depth, set on the host list at once, unless it has
++    /// the same ones already: the title sets the same targets again and
++    /// again, creating host views and calling the driver.
++    /// Set `VICTORY_BIND_CACHE=1` to reuse identical bindings.
+     pub(crate) fn set_targets(&mut self, list: &HostList, handles: &[u64], depth: u64) {
+         let Some(host) = crate::host::host() else {
+             return;
+@@ -759,7 +770,10 @@
+         self.depth_handle = depth;
+         self.targets_set = true;
+         self.targets.clear();
+-        let mut rtvs = Vec::new();
++        let mut views = Vec::with_capacity(handles.len());
++        static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++        let cache = *CACHE.get_or_init(|| std::env::var_os("VICTORY_BIND_CACHE").is_some_and(|v| v == "1"));
++        let mut keys = Vec::new();
+         for &h in handles {
+             let Some(record) = crate::descriptor::rtv_record(h) else {
+                 once!(
+@@ -779,14 +793,16 @@
+                     .desc()
+                     .filter(|d| d.Format.0 != 0 && d.ViewDimension.0 != 0);
+                 if let Some(desc) = null {
+-                    rtvs.push(host.rtv(None, Some(&desc)));
++                    views.push((None, Some(desc)));
++                    if cache { keys.push((0, record.key())); }
+                 }
+                 continue;
+             };
+             self.targets.push(record.resource as usize);
+             #[cfg(feature = "diagnostics")]
+             crate::capture::note_target(record.resource);
+-            rtvs.push(host.rtv(Some(texture), record.desc().as_ref()));
++            views.push((Some(texture), record.desc()));
++            if cache { keys.push((texture.as_raw() as usize, record.key())); }
+         }
+         self.depth = 0;
+         self.depth_state = DEPTH_WRITE;
+@@ -799,8 +815,19 @@
+             }
+             #[cfg(feature = "diagnostics")]
+             crate::capture::note_target(record.resource);
+-            Some(host.dsv(texture, record.depth_desc().as_ref()))
++            Some((texture, record))
+         });
++        if cache {
++            let now = (keys, dsv.as_ref().map(|(texture, record)| (texture.as_raw() as usize, record.key())));
++            if self.host_targets.as_ref() == Some(&now) {
++                crate::framelog::add(crate::framelog::T::TargetBindsSkipped, 1);
++                return;
++            }
++            self.host_targets = Some(now);
++        }
++        crate::framelog::add(crate::framelog::T::TargetBinds, 1);
++        let rtvs: Vec<_> = views.iter().map(|(texture, desc)| host.rtv(*texture, desc.as_ref())).collect();
++        let dsv = dsv.map(|(texture, record)| host.dsv(texture, record.depth_desc().as_ref()));
+         // SAFETY: an open list; the views were just made.
+         unsafe {
+             list.list.OMSetRenderTargets(
+@@ -873,6 +900,7 @@
+         if self.topology_set {
+             self.set_topology(list, self.topology);
+         }
++        self.host_targets = None;
+         if self.targets_set {
+             let handles = std::mem::take(&mut self.target_handles);
+             self.set_targets(list, &handles, self.depth_handle);
+--- a/crates/victory-gpu/src/framelog.rs
++++ b/crates/victory-gpu/src/framelog.rs
+@@ -62,6 +62,8 @@
+     /// readers.
+     Remaps,
+     RemapUs,
++    TargetBinds,
++    TargetBindsSkipped,
+     RemapWaitUs,
+     MapViewUs,
+     UnmapViewUs,
+@@ -416,7 +418,7 @@
+          still), {:.0} uploads, staging {:.0} made {:.0} reused | remapping: {:.0} calls {:.1} ms ({:.1} waiting for \
+          readers, {:.1} mapping, {:.1} unmapping) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
+          faults: {:.0} page, {:.0} guard | process: {:.0} user {:.0} kernel ms | pacing, all threads {:.1} ms | {:.0} \
+-         draws | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
++         draws | target binds: {:.0} sent, {:.0} reused | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
+         f.us / 1e3,
+         (s(S_THREAD_USER) + s(S_THREAD_KERNEL)) / 1e3,
+         s(S_THREAD_USER) / 1e3,
+@@ -470,6 +472,8 @@
+         s(S_PROCESS_KERNEL) / 1e3,
+         ms(T::PaceUs),
+         s(S_DRAWS),
++        t(T::TargetBinds),
++        t(T::TargetBindsSkipped),
+         s(S_FREE_MB),
+         t(T::RenderSlow),
+         t(T::RenderLooks),

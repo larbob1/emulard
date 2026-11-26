@@ -9,16 +9,23 @@ import sys
 
 UPSTREAM = "https://github.com/fxceless/victory-fork.git"
 REVISION = "2119b0e44c53aa9648307b0c5c73590290305b1f"
+FXCELESS_REFRESH = "d510ee4a9b635bcc345207a73ccb4c4fceb8228c"
 PATCHER = Path(__file__).resolve().with_name("apply_memory_patch.py")
 
 def run(args, cwd=None):
     subprocess.run(args, cwd=cwd, check=True)
 
+def build_binaries(target):
+    run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
+    run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("checkout", type=Path, help="new directory outside this repository")
     ap.add_argument("--build", action="store_true", help="compile using the Windows toolchain")
-    ap.add_argument("--lighting-memory", action="store_true", help="apply the experimental shader page-boundary candidate")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--lighting-memory", action="store_true", help="apply the experimental shader page-boundary candidate")
+    mode.add_argument("--fxceless-refresh", action="store_true", help="use the newer fxceless renderer with the integer blend and Wine memory fixes")
     ns = ap.parse_args()
     target = ns.checkout.resolve()
     own = PATCHER.parent.parent
@@ -29,7 +36,30 @@ def main():
     try:
         run(["git", "clone", "--no-checkout", UPSTREAM, str(target)])
         run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
-        run(["git", "checkout", "--detach", REVISION], target)
+        revision = FXCELESS_REFRESH if ns.fxceless_refresh else REVISION
+        run(["git", "checkout", "--detach", revision], target)
+        if ns.fxceless_refresh:
+            for patch in (
+                "belobug-integer-blend-fxceless.patch",
+                "wine-disk-backed-memory.patch",
+                "reuse-page-placeholder.patch",
+                "streaming-page-aliases.patch",
+                "tile-mapping-replay.patch",
+                "texture-table-check.patch",
+                "render-target-bind-cache.patch",
+                "wave-wide-digest-selection.patch",
+                "texture-view-coverage.patch",
+                "reuse-vacant-page-placeholders.patch",
+            ):
+                run(["git", "apply", str(own / "patches" / patch)], target)
+            run(["git", "diff", "--check"], target)
+            if ns.build:
+                run(["cargo", "test", "--locked", "-p", "victory-hle", "tile_replay_checks"], target)
+                run(["cargo", "test", "--locked", "-p", "victory-hle", "vacant_pages_can_be_remapped_after_coalescing"], target)
+                build_binaries(target)
+            else:
+                print("Patched source prepared; compilation not attempted.")
+            return 0
         run([sys.executable, str(PATCHER), str(target), "--apply", "--scratch-budget", "--write-index"])
         run([sys.executable, str(PATCHER.with_name("apply_query_patch.py")), str(target), "--apply"])
         if ns.lighting_memory:
@@ -53,6 +83,13 @@ def main():
         run(["git", "apply", str(own / "patches" / "predicate-iterative.patch")], target)
         run([sys.executable, str(PATCHER.with_name("apply_divergent_wave_retry_patch.py")), str(target), "--apply"])
         run(["git", "apply", str(own / "patches" / "presentx-multiplane.patch")], target)
+        run(["git", "apply", str(own / "patches" / "array-lod.patch")], target)
+        run(["git", "apply", str(own / "patches" / "signature-interpolation.patch")], target)
+        run(["git", "apply", str(own / "patches" / "indexed-buffer-descriptors.patch")], target)
+        # Belobug 8629211 and fxceless 8dd30ab, adapted to the pinned runtime.
+        run(["git", "apply", str(own / "patches" / "belobug-integer-blend.patch")], target)
+        run(["git", "apply", str(own / "patches" / "fxceless-shared-exponent-target.patch")], target)
+        run(["git", "apply", str(own / "patches" / "wine-disk-backed-memory.patch")], target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:
@@ -86,8 +123,8 @@ def main():
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "worker_limit_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "startup_worker_tests"], target)
             run(["cargo", "test", "--locked", "-p", "victory-gpu", "texture_budget_tests"], target)
-            run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
-            run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
+            run(["cargo", "test", "--locked", "-p", "victory-gpu", "integer_blend_tests"], target)
+            build_binaries(target)
         else:
             print("Patched source prepared; compilation not attempted.")
     except (OSError, subprocess.CalledProcessError) as exc:

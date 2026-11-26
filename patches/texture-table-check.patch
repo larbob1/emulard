@@ -1,0 +1,124 @@
+--- a/crates/victory-gpu/src/inplace.rs
++++ b/crates/victory-gpu/src/inplace.rs
+@@ -343,6 +343,43 @@
+             }
+         }
+     }
++}
++
++/// Reads a span from the backing section selected by the live view table.
++#[cfg(feature = "diagnostics")]
++pub(crate) fn read_view_backing(at: usize, out: &mut [u8], _mapped: &crate::watch::Reading) -> bool {
++    use windows_sys::Win32::System::Memory::{FILE_MAP_READ, MapViewOfFile, UnmapViewOfFile};
++
++    let (section, offset) = {
++        let v = views();
++        let Some((&base, &(len, section, offset))) = v.views.range(..=at).next_back() else {
++            return false;
++        };
++        let within = at - base;
++        if within >= len || out.len() > len - within
++            || !v.sections.iter().any(|&(handle, _, committed)| handle == section && committed)
++        {
++            return false;
++        }
++        (section, offset + within as u64)
++    };
++    let aligned = offset / K64 as u64 * K64 as u64;
++    let within = (offset - aligned) as usize;
++    // SAFETY: the caller holds the mapping read guard and the title view
++    // retains the section. This temporary read-only view covers the span.
++    let view = unsafe {
++        MapViewOfFile(
++            section as *mut c_void, FILE_MAP_READ, (aligned >> 32) as u32, aligned as u32,
++            within + out.len(),
++        )
++    };
++    if view.Value.is_null() {
++        return false;
++    }
++    let read = crate::host::read_into(view.Value.cast::<u8>().wrapping_add(within), out);
++    // SAFETY: just created above and not shared with another thread.
++    unsafe { UnmapViewOfFile(view) };
++    read
+ }
+ 
+ /// The title views that overlap `[start, end)`, as `(address, bytes)`.
+--- a/crates/victory-gpu/src/texture.rs
++++ b/crates/victory-gpu/src/texture.rs
+@@ -452,6 +452,66 @@
+     })
+ }
+ 
++/// Compare the texture's existing view with the section selected by the
++/// software table. Concurrent game writes can change bytes between reads.
++#[cfg(feature = "diagnostics")]
++fn check_backing_view(memory: *const u8, size: usize, mapped: &crate::watch::Reading) {
++    use std::sync::OnceLock;
++    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
++
++    static FIRST_FRAME: OnceLock<Option<u64>> = OnceLock::new();
++    static VISITS: AtomicU64 = AtomicU64::new(0);
++    static RESULTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
++    let Some(first) = *FIRST_FRAME.get_or_init(|| {
++        std::env::var("VICTORY_TEXTURE_TABLE_CHECK").ok()?.parse().ok()
++    }) else {
++        return;
++    };
++    let frame = crate::queue::presented();
++    if frame < first || size == 0 {
++        return;
++    }
++    const STRIDE: u64 = 16;
++    const LIMIT: u64 = 512;
++    let visit = VISITS.fetch_add(1, Relaxed);
++    let sample = visit / STRIDE + 1;
++    if !visit.is_multiple_of(STRIDE) || sample > LIMIT {
++        return;
++    }
++
++    let page_left = 65536 - (memory as usize % 65536);
++    let bytes = size.min(page_left);
++    let mut before = vec![0; bytes];
++    let mut backing = vec![0; bytes];
++    let result = if !crate::host::read_into(memory, &mut before)
++        || !crate::inplace::read_view_backing(memory as usize, &mut backing, mapped)
++    {
++        0
++    } else if before == backing {
++        1
++    } else {
++        let mut after = vec![0; bytes];
++        if !crate::host::read_into(memory, &mut after) || after != before {
++            2
++        } else {
++            3
++        }
++    };
++    let status = ["skipped", "matched", "changed", "different"][result];
++    tracing::debug!(
++        target: "victory_gpu::texture_table", frame, at = memory as usize,
++        texture_bytes = size, bytes, status, "texture backing sample"
++    );
++    RESULTS[result].fetch_add(1, Relaxed);
++    if result == 3 {
++        tracing::warn!(frame, bytes, "texture table check found different bytes");
++    }
++    if sample == 1 || sample.is_multiple_of(32) || result == 3 {
++        let [skipped, matched, changed, different] = RESULTS.each_ref().map(|n| n.load(Relaxed));
++        tracing::info!(frame, sample, skipped, matched, changed, different, "texture table check");
++    }
++}
++
+ /// Staging buffers alive (also those only a list still holds) and their
+ /// bytes.
+ static STAGED: [std::sync::atomic::AtomicU64; 2] = [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+@@ -1045,6 +1105,8 @@
+         } else {
+             waited(2, crate::watch::title_memory_reading)
+         };
++        #[cfg(feature = "diagnostics")]
++        check_backing_view(self.memory, size, &_mapped);
+         if !committed(self.memory, size) {
+             // Partly mapped: a streamed texture with only some mips' pages
+             // there, the usual state while it streams in. Read through the

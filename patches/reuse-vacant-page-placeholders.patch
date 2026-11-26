@@ -1,0 +1,170 @@
+# Reuse a single-page placeholder across separate unmap and map requests.
+# Adapted from avatarmanz/VIctory-7900XTX commit 49d7126.
+
+--- a/crates/victory-hle/src/modules/xmem.rs
++++ b/crates/victory-hle/src/modules/xmem.rs
+@@ -377,6 +377,8 @@
+     pages: HashMap<usize, Slice>,
+     /// Mapped views by address: their length and what they show.
+     views: BTreeMap<usize, (usize, Slice)>,
++    /// Single-page placeholders preserved by an earlier unmap.
++    vacant_pages: BTreeSet<usize>,
+     /// Where each page shows: by its section and its index there, the
+     /// address of that page in every view that shows it now ([`shown_at`];
+     /// as upstream's c75fdba keeps it). The title maps pages where the
+@@ -395,6 +397,12 @@
+ 
+ fn physical() -> MutexGuard<'static, Physical> {
+     PHYSICAL.lock().unwrap_or_else(|e| e.into_inner())
++}
++
++fn cache_vacant_pages() -> bool {
++    static ENABLED: LazyLock<bool> =
++        LazyLock::new(|| std::env::var_os("VICTORY_CACHE_PAGE_PLACEHOLDERS").is_some_and(|v| v == "1"));
++    *ENABLED
+ }
+ 
+ /// Back this section with a sparse file so the host can reclaim its pages
+@@ -830,31 +838,35 @@
+ }
+ 
+ fn map_view(physical: &mut Physical, base: usize, len: usize, slice: Slice, split: bool) -> bool {
+-    // SAFETY: splits the placeholder around the range (failing harmlessly
+-    // when the range is the whole placeholder), then maps the section
+-    // there; both act only on placeholders.
+     let started = std::time::Instant::now();
+-    let view = unsafe {
+-        // An exact view unmapped with MEM_PRESERVE_PLACEHOLDER already
+-        // yielded a placeholder of the requested size.
++    let map = || {
++        // SAFETY: MEM_REPLACE_PLACEHOLDER requires an exact placeholder.
++        unsafe {
++            MapViewOfFile3(
++                slice.section.0,
++                GetCurrentProcess(),
++                base as *const c_void,
++                (slice.index * PAGE) as u64,
++                len,
++                MEM_REPLACE_PLACEHOLDER,
++                PAGE_READWRITE,
++                std::ptr::null_mut(),
++                0,
++            )
++        }
++    };
++    let vacant_page = cache_vacant_pages() && len == PAGE && physical.vacant_pages.remove(&base);
++    let cached_view = (vacant_page && split).then(map).filter(|view| view.Value as usize == base);
++    let view = if let Some(view) = cached_view {
++        victory_gpu::framelog::add(victory_gpu::framelog::T::PagePlaceholderHits, 1);
++        view
++    } else {
++        // A cached placeholder may have been coalesced since the unmap.
+         if split {
+-            VirtualFree(
+-                base as *mut c_void,
+-                len,
+-                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER,
+-            );
+-        }
+-        MapViewOfFile3(
+-            slice.section.0,
+-            GetCurrentProcess(),
+-            base as *const c_void,
+-            (slice.index * PAGE) as u64,
+-            len,
+-            MEM_REPLACE_PLACEHOLDER,
+-            PAGE_READWRITE,
+-            std::ptr::null_mut(),
+-            0,
+-        )
++            // SAFETY: splits only a placeholder.
++            unsafe { VirtualFree(base as *mut c_void, len, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER) };
++        }
++        map()
+     };
+     victory_gpu::framelog::add(victory_gpu::framelog::T::MapViewUs, started.elapsed().as_micros() as u64);
+     if view.Value as usize != base {
+@@ -980,6 +992,11 @@
+             )
+         } != 0;
+         victory_gpu::framelog::add(victory_gpu::framelog::T::UnmapViewUs, started.elapsed().as_micros() as u64);
++        if unmapped && size == PAGE && cache_vacant_pages() && at >= base && at + size <= end
++            && physical.vacant_pages.len() < 65_536
++        {
++            physical.vacant_pages.insert(at);
++        }
+         exact_placeholder |= unmapped && at == base && size == len;
+         if at < base {
+             map(physical, at, base - at, slice.clone());
+@@ -1348,6 +1365,44 @@
+     }
+ 
+     #[test]
++    fn vacant_pages_can_be_remapped_after_coalescing() {
++        const MEM_COALESCE_PLACEHOLDERS: u32 = 1;
++
++        let pages = allocate(2);
++        let a = XMemVirtualAlloc(
++            std::ptr::null_mut(),
++            2 * PAGE,
++            MEM_RESERVE | PAGES_64K,
++            0,
++            PAGE_READWRITE,
++        );
++        assert!(!a.is_null());
++        let b = a.wrapping_byte_add(PAGE);
++        for (address, page) in [(a, &pages[0]), (b, &pages[1])] {
++            assert_eq!(XMemMapPhysicalPages(address, 1, page), address);
++            // SAFETY: the first byte of each successfully mapped page is writable.
++            unsafe { address.cast::<u8>().write(if address == a { 17 } else { 29 }) };
++            assert_eq!(XMemMapPhysicalPages(address, 1, std::ptr::null()), address);
++        }
++        assert_eq!(XMemMapPhysicalPages(a, 1, &pages[0]), a);
++        assert_eq!(XMemMapPhysicalPages(a, 1, std::ptr::null()), a);
++        if cache_vacant_pages() {
++            assert!(physical().vacant_pages.contains(&(a as usize)));
++        }
++        // SAFETY: both adjacent pages are empty placeholders from one reservation.
++        assert_ne!(
++            unsafe { VirtualFree(a, 2 * PAGE, MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS) },
++            0
++        );
++        assert_eq!(XMemMapPhysicalPages(a, 1, &pages[1]), a);
++        assert_eq!(XMemMapPhysicalPages(b, 1, &pages[0]), b);
++        // SAFETY: both mappings just succeeded with the swapped backing pages.
++        assert_eq!(unsafe { (a.cast::<u8>().read(), b.cast::<u8>().read()) }, (29, 17));
++        assert_eq!(XMemMapPhysicalPages(a, 2, std::ptr::null()), a);
++        assert_eq!(XMemFreePhysicalPages(2, pages.as_ptr()), 1);
++    }
++
++    #[test]
+     fn mapping_no_pages_changes_nothing() {
+         let pages = allocate(2);
+         let a = XMemVirtualAlloc(
+--- a/crates/victory-gpu/src/framelog.rs
++++ b/crates/victory-gpu/src/framelog.rs
+@@ -63,6 +63,7 @@
+     Remaps,
+     RemapUs,
+     TextureViewChecks,
++    PagePlaceholderHits,
+     TargetBinds,
+     TargetBindsSkipped,
+     RemapWaitUs,
+@@ -419,7 +420,7 @@
+          still), {:.0} uploads, staging {:.0} made {:.0} reused | remapping: {:.0} calls {:.1} ms ({:.1} waiting for \
+          readers, {:.1} mapping, {:.1} unmapping) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
+          faults: {:.0} page, {:.0} guard | process: {:.0} user {:.0} kernel ms | pacing, all threads {:.1} ms | {:.0} \
+-         draws | target binds: {:.0} sent, {:.0} reused | texture view checks: {:.0} | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
++         draws | target binds: {:.0} sent, {:.0} reused | texture view checks: {:.0} | reused vacant placeholders: {:.0} | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
+         f.us / 1e3,
+         (s(S_THREAD_USER) + s(S_THREAD_KERNEL)) / 1e3,
+         s(S_THREAD_USER) / 1e3,
+@@ -476,6 +477,7 @@
+         t(T::TargetBinds),
+         t(T::TargetBindsSkipped),
+         t(T::TextureViewChecks),
++        t(T::PagePlaceholderHits),
+         s(S_FREE_MB),
+         t(T::RenderSlow),
+         t(T::RenderLooks),
