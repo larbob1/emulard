@@ -1,0 +1,365 @@
+diff --git a/crates/victory-shader/src/emit/wave64_tests.rs b/crates/victory-shader/src/emit/wave64_tests.rs
+index 55cc55d..8c712e4 100644
+--- a/crates/victory-shader/src/emit/wave64_tests.rs
++++ b/crates/victory-shader/src/emit/wave64_tests.rs
+@@ -420,6 +420,11 @@ fn a_wave_or_inside(skip: u32, name: &str) {
+ /// Runs `shader` on the hardware device with the root constants `s0`, `s1` and gives dword 0
+ /// of the UAV; None (and a line) without a device that takes it.
+ fn on_the_card(shader: &HostShader, constants: [u32; 2]) -> Option<u32> {
++    whole_uav(shader, constants, 1).map(|out| out[0])
++}
++
++/// As [`on_the_card`], and gives the first `dwords` dwords of the UAV.
++fn whole_uav(shader: &HostShader, constants: [u32; 2], dwords: u32) -> Option<Vec<u32>> {
+     let Ok(host) = Host::new(false) else {
+         eprintln!("no SM 6.6 hardware device; not run");
+         return None;
+@@ -440,13 +445,13 @@ fn on_the_card(shader: &HostShader, constants: [u32; 2]) -> Option<u32> {
+             &pso,
+             &Dispatch {
+                 roots: vec![(0, Root::Constants(ud))],
+-                views: &[View::RawUav(1)],
++                views: &[View::RawUav(dwords)],
+                 samplers: &[],
+                 groups: [1, 1, 1],
+             },
+         )
+         .unwrap_or_else(|e| panic!("dispatch failed: {e}"));
+-    Some(out[0][0])
++    Some(out[0].clone())
+ }
+ 
+ /// A 32-lane console wave. A register holds a lane mask on one path (the lanes below s0)
+@@ -530,3 +535,155 @@ fn scc_of_a_mask_operation_joined_with_a_scalar_test_needs_the_skip_wave_wide()
+     }
+     eprintln!("ran on the hardware device: the inner test's SCC for every lane once some lane is inside");
+ }
++
++/// A wave64 program of 128 threads (two console waves) that leaves early when no lane of its
++/// wave is below s0, as the console's compiler does when the end of the program is too far for
++/// a branch: `s_cbranch_execnz` over a far jump to the end. `extra` are words that go into the
++/// far jump's block before it, and `work_at_end` puts an instruction between the jump's target
++/// and the end of the program. Then the gate: every thread stores 1, or 2 when some lane of its
++/// console wave that is still running has the thread number s1 (the lanes that fail a test).
++fn far_early_out(extra: &[u32], work_at_end: bool) -> NativeProgram {
++    let gate = [
++        0x7D84_0001, // v_cmp_eq_u32 vcc, s1, v0
++        0xBE90_106A, // s_bcnt1_i32_b64 s16, vcc
++        0xBF06_8010, // s_cmp_eq_u32 s16, 0
++        0x8511_8281, // s_cselect_b32 s17, 1, 2
++        0x7E02_0211, // v_mov_b32 v1, s17
++        0x3404_0082, // v_lshlrev_b32 v2, 2, v0
++        0x38 << 26 | 0x1C << 18 | 1 << 12,
++        0x80 << 24 | 2 << 16 | 1 << 8 | 2, // buffer_store_dword v1, v2, s[8:11], 0 offen
++    ];
++    let jump = [
++        0xBE8E_1F00, // s_getpc_b64 s[14:15]
++        0x800E_FF0E,
++        4 * (4 + gate.len() as u32), // s_add_u32 s14, s14, the way to the end
++        0x820F_800F, // s_addc_u32 s15, s15, 0
++        0xBE80_200E, // s_setpc_b64 s[14:15]
++    ];
++    let mut words = vec![
++        0x7D88_0000, // v_cmp_gt_u32 vcc, s0, v0
++        0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
++        0xBF89_0000 | (extra.len() + jump.len()) as u32, // s_cbranch_execnz over the jump
++    ];
++    words.extend_from_slice(extra);
++    words.extend_from_slice(&jump);
++    words.extend_from_slice(&gate);
++    if work_at_end {
++        words.push(0x7E06_0281); // v_mov_b32 v3, 1
++    }
++    native_of(&words, true, 128)
++}
++
++fn branches_named(p: &ir::Program, name: &str) -> usize {
++    p.blocks.iter().filter(|b| b.insts.last().is_some_and(|i| i.name() == name)).count()
++}
++
++/// What the gate of [`far_early_out`] stores in each of 128 threads.
++fn gate_expected(below: u32, failing: u32) -> Vec<u32> {
++    (0..128u32)
++        .map(|t| {
++            let some_fail = failing < below && failing / 64 == t / 64;
++            match (t < below, some_fail) {
++                (false, _) => 0,
++                (true, false) => 1,
++                (true, true) => 2,
++            }
++        })
++        .collect()
++}
++
++#[test]
++fn a_far_early_out_is_left_out_and_the_gate_counts_the_lanes_of_both_halves() {
++    let native = far_early_out(&[], false);
++    let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
++    assert_eq!(branches_named(&p, "s_cbranch_execnz"), 1);
++    lower::take_needs();
++    let kept = lowered(&native, &p, &HashSet::new());
++    assert!(
++        matches!(&kept, Err(ShaderError::Unsupported { what, .. }) if what.ends_with("where not every lane runs")
++            || *what == "group-wide meetings in independently branching console waves"),
++        "{:?}",
++        kept.err()
++    );
++    for (name, form) in [("early-outs", ir::without_early_outs(&p)), ("skips", ir::without_skips(&p, false))] {
++        let form = form.unwrap_or_else(|| panic!("without {name}: the far early-out stays"));
++        assert_eq!(branches_named(&form, "s_cbranch_execnz"), 0, "without {name}");
++    }
++    let form = ir::without_early_outs(&p).expect("left out");
++    let shader = lowered(&native, &form, &HashSet::new()).expect("lower");
++    if let Ok(mut v) = validator::Validator::load(validator::Validator::default_path().as_deref()) {
++        let mut copy = shader.dxil.clone();
++        v.validate(&mut copy).expect("DXIL validation failed");
++    }
++    let _one = super::valu_tests::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
++    // (threads below s0 are in bounds; the one thread s1 fails the test) A failing thread of the
++    // upper half gives 2 to the lower half's threads as well, and a failing thread out of
++    // bounds counts for nothing
++    for (below, failing) in [(128u32, 40u32), (128, 100), (128, 63), (40, 50), (40, 10), (33, 32), (1, 0), (0, 5)] {
++        let Some(got) = whole_uav(&shader, [below, failing], 128) else { return };
++        assert_eq!(got, gate_expected(below, failing), "{below} threads in bounds, thread {failing} fails");
++    }
++    eprintln!("ran on the hardware device: the gate's count over both halves of each console wave");
++}
++
++#[test]
++fn a_far_jump_that_does_work_is_not_an_early_out() {
++    // work in the jump's block, and work between the jump's target and the end
++    for (name, native) in [
++        ("work in the jump", far_early_out(&[0xBE94_0385], false)), // s_mov_b32 s20, 5
++        ("work at the target", far_early_out(&[], true)),
++    ] {
++        let p = ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build");
++        assert_eq!(branches_named(&p, "s_cbranch_execnz"), 1, "{name}");
++        assert!(ir::without_early_outs(&p).is_none(), "{name}");
++        assert!(ir::without_skips(&p, false).is_none(), "{name}");
++        assert!(ir::without_skips(&p, true).is_none(), "{name}");
++    }
++}
++
++/// `if (t < s0) { park s[20:21]; if (s1 == 0) {..} else {..}; take it back }` and a read of
++/// s[20:21] after the join, as the console's compiler leaves a parked scalar across an inner
++/// branch. `then` is the inner branch's first arm; the second one leaves the parked scalar alone.
++fn parked_across_an_inner_branch(then: u32) -> ir::Program {
++    let body = [
++        0xBE96_0414, // s_mov_b64 s[22:23], s[20:21]
++        0xBF06_8001, // s_cmp_eq_u32 s1, 0
++        0xBF85_0002, // s_cbranch_scc1 to the second arm
++        then,
++        0xBF82_0001, // s_branch to the join
++        0xBE98_0382, // s_mov_b32 s24, 2
++        0xBE94_0416, // s_mov_b64 s[20:21], s[22:23]
++    ];
++    let mut words = vec![
++        0xBE94_0406, // s_mov_b64 s[20:21], s[6:7]
++        0x7D88_0000, // v_cmp_gt_u32 vcc, s0, v0
++        0xBE8C_246A, // s_and_saveexec_b64 s[12:13], vcc
++        0xBF88_0000 | body.len() as u32, // s_cbranch_execz past the body
++    ];
++    words.extend_from_slice(&body);
++    words.extend_from_slice(&[
++        0xBEFE_040C, // s_mov_b64 exec, s[12:13]
++        0x7E02_0214, // v_mov_b32 v1, s20
++    ]);
++    let native = native(&words);
++    ir::build(&native.code, native.wave64, native.vgprs).expect("ir::build")
++}
++
++#[test]
++fn a_skip_whose_parked_scalars_pass_an_inner_branch_unchanged_is_left_out() {
++    let p = parked_across_an_inner_branch(0xBE96_0314); // s_mov_b32 s22, s20
++    assert_eq!(branches_named(&p, "s_cbranch_execz"), 1);
++    // (s22 comes back through a phi of the inner join whose two arguments are copies of one
++    // value: only `deep` follows it)
++    assert!(ir::without_skips(&p, false).is_none());
++    let deep = ir::without_skips(&p, true).expect("left out");
++    assert_eq!(branches_named(&deep, "s_cbranch_execz"), 0);
++}
++
++#[test]
++fn a_skip_whose_parked_scalar_an_inner_branch_changes_is_kept() {
++    let p = parked_across_an_inner_branch(0xBE96_0387); // s_mov_b32 s22, 7
++    assert_eq!(branches_named(&p, "s_cbranch_execz"), 1);
++    assert!(ir::without_skips(&p, false).is_none());
++    assert!(ir::without_skips(&p, true).is_none());
++}
+diff --git a/crates/victory-shader/src/ir.rs b/crates/victory-shader/src/ir.rs
+index 0b8fd9c..8dca6ce 100644
+--- a/crates/victory-shader/src/ir.rs
++++ b/crates/victory-shader/src/ir.rs
+@@ -588,21 +588,16 @@ pub(crate) fn thread_edges(
+ /// only when no lane of the wave is left; scalar code has no effects. The
+ /// body is then code every lane runs, which a console wave run as two host
+ /// waves needs for the barriers of its exchanges and LDS accesses.
++/// A program too long for the branch to reach its end has the other form of the same
++/// early-out: `s_cbranch_execnz` over a far jump to that end, which is left out as well.
+ /// `None` if the program has no such branch.
+ pub(crate) fn without_early_outs(p: &Program) -> Option<Program> {
+-    let ends = |b: usize| {
+-        p.blocks[b].exit == Exit::End
+-            && p.blocks[b].insts.iter().all(|i| matches!(i.fields, crate::gfx10::Fields::Sopp { .. }))
+-    };
+     let mut blocks = p.blocks.clone();
+     let mut any = false;
+-    for block in &mut blocks {
+-        let Exit::Branch { taken, not_taken } = block.exit else {
+-            continue;
+-        };
+-        if ends(taken) && block.insts.last().is_some_and(|i| i.name() == "s_cbranch_execz") {
++    for (b, block) in blocks.iter_mut().enumerate() {
++        if let Some(next) = early_out_continuation(p, b) {
+             block.insts.pop();
+-            block.exit = Exit::Jump(not_taken);
++            block.exit = Exit::Jump(next);
+             any = true;
+         }
+     }
+@@ -617,6 +612,39 @@ pub(crate) fn without_early_outs(p: &Program) -> Option<Program> {
+     Some(rename(blocks, p.wave64, p.vgprs))
+ }
+ 
++/// Whether block `b` only ends the program.
++fn ends_program(p: &Program, b: usize) -> bool {
++    p.blocks[b].exit == Exit::End
++        && p.blocks[b].insts.iter().all(|i| matches!(i.fields, crate::gfx10::Fields::Sopp { .. }))
++}
++
++/// Whether block `b` is the far jump of a console branch whose target is too far for the
++/// branch's 16-bit offset (`s_getpc_b64`, an address added to it, `s_setpc_b64`) to a block
++/// that only ends the program. Code that does any work on the way stays what it is.
++fn far_jump_to_end(p: &Program, b: usize) -> bool {
++    let block = &p.blocks[b];
++    matches!(block.exit, Exit::Jump(target) if ends_program(p, target))
++        && block
++            .insts
++            .iter()
++            .all(|i| matches!(i.name(), "s_getpc_b64" | "s_add_u32" | "s_addc_u32" | "s_setpc_b64"))
++}
++
++/// Where the lanes that stay go when block `b` ends in an early-out: `s_cbranch_execz` to a
++/// block that only ends the program, or `s_cbranch_execnz` whose other way is a far jump to
++/// such a block (a program too long for the branch to reach its end). The branch is then
++/// left out and the code goes on there.
++fn early_out_continuation(p: &Program, b: usize) -> Option<usize> {
++    let Exit::Branch { taken, not_taken } = p.blocks[b].exit else {
++        return None;
++    };
++    match p.blocks[b].insts.last()?.name() {
++        "s_cbranch_execz" if ends_program(p, taken) => Some(not_taken),
++        "s_cbranch_execnz" if far_jump_to_end(p, not_taken) => Some(taken),
++        _ => None,
++    }
++}
++
+ /// As [`without_early_outs`], and also without the branches that only skip a
+ /// region when no lane is left for it: an `s_cbranch_execz` whose target is
+ /// where the skipped code ends up anyway (`if (c) { ... }` with nothing
+@@ -631,17 +659,15 @@ pub(crate) fn without_early_outs(p: &Program) -> Option<Program> {
+ ///
+ /// `deep` looks closer at what the code after the branch can see. A scalar the region moves
+ /// away and back (the compiler parks scalars in VGPR lanes around a branch and takes them
+-/// back before the join, `unspill`) is the value it copies; a join nothing reads shows no
+-/// one the difference (a restore of EXEC that the next one overwrites reads nothing); and
+-/// the join may have other ways in (an inner branch that ends together with an outer one).
++/// back before the join, `unspill`) is the value it copies, and so is a scalar phi whose
++/// arguments all come to one value (a join of branches that left it alone); a join nothing
++/// reads shows no one the difference (a restore of EXEC that the next one overwrites reads
++/// nothing); and the join may have other ways in (an inner branch that ends together with an
++/// outer one).
+ /// That leaves out most of the skips of the title's large lighting programs, whose bodies
+ /// are then code every lane runs.
+ pub(crate) fn without_skips(p: &Program, deep: bool) -> Option<Program> {
+     let n = p.blocks.len();
+-    let ends = |b: usize| {
+-        p.blocks[b].exit == Exit::End
+-            && p.blocks[b].insts.iter().all(|i| matches!(i.fields, crate::gfx10::Fields::Sopp { .. }))
+-    };
+     // Scalars moved from register to register (a scalar the compiler parked in a VGPR lane
+     // comes back by such a move, `unspill`) are the value they copy.
+     let mut copy: std::collections::HashMap<Value, Value> = Default::default();
+@@ -690,12 +716,10 @@ pub(crate) fn without_skips(p: &Program, deep: bool) -> Option<Program> {
+             }
+         }
+     }
+-    let root = |mut v: Value| {
+-        while deep && let Some(&c) = copy.get(&v) {
+-            v = c;
+-        }
+-        v
+-    };
++    if deep {
++        copy_through_phis(p, &mut copy);
++    }
++    let root = |v: Value| if deep { follow(&copy, v) } else { v };
+     // The region a skip of `b` to `target` leaves out, if it is a pure skip.
+     let skipped = |b: usize, target: usize, first: usize| -> Option<Vec<bool>> {
+         let mut inside = vec![false; n];
+@@ -752,12 +776,13 @@ pub(crate) fn without_skips(p: &Program, deep: bool) -> Option<Program> {
+         let Exit::Branch { taken, not_taken } = p.blocks[b].exit else {
+             continue;
+         };
+-        if !p.blocks[b].insts.last().is_some_and(|i| i.name() == "s_cbranch_execz") {
+-            continue;
+-        }
+-        if ends(taken) || skipped(b, taken, not_taken).is_some() {
++        let next = early_out_continuation(p, b).or_else(|| {
++            let skip = p.blocks[b].insts.last().is_some_and(|i| i.name() == "s_cbranch_execz");
++            (skip && skipped(b, taken, not_taken).is_some()).then_some(not_taken)
++        });
++        if let Some(next) = next {
+             blocks[b].insts.pop();
+-            blocks[b].exit = Exit::Jump(not_taken);
++            blocks[b].exit = Exit::Jump(next);
+             any = true;
+         }
+     }
+@@ -772,6 +797,46 @@ pub(crate) fn without_skips(p: &Program, deep: bool) -> Option<Program> {
+     Some(rename(blocks, p.wave64, p.vgprs))
+ }
+ 
++/// The value `v` is a copy of, followed to the end of `copy`'s chains.
++fn follow(copy: &std::collections::HashMap<Value, Value>, mut v: Value) -> Value {
++    while let Some(&c) = copy.get(&v) {
++        v = c;
++    }
++    v
++}
++
++/// The one value every argument of the scalar `phi` comes to (the phi's own value left
++/// aside, as a loop's back edge brings it), if there is one.
++fn single_source(copy: &std::collections::HashMap<Value, Value>, phi: &Phi) -> Option<Value> {
++    let mut one = None;
++    for x in phi.args.iter().map(|&a| follow(copy, a)).filter(|&x| x != phi.value) {
++        if *one.get_or_insert(x) != x {
++            return None;
++        }
++    }
++    one
++}
++
++/// Adds to `copy` the scalar phis that pass one value through (a join of branches none of
++/// which changed it, one after the other, as the console's compiler leaves them): such a phi
++/// is a copy of that value. A phi that merges a real change is not. Repeats until no phi is
++/// added, for a phi may pass through the ones before it.
++fn copy_through_phis(p: &Program, copy: &mut std::collections::HashMap<Value, Value>) {
++    let mut added = true;
++    while added {
++        added = false;
++        for phi in p.blocks.iter().flat_map(|b| &b.phis) {
++            if copy.contains_key(&phi.value) || !matches!(phi.reg, Reg::S(_) | Reg::Scc) {
++                continue;
++            }
++            if let Some(one) = single_source(copy, phi) {
++                copy.insert(phi.value, one);
++                added = true;
++            }
++        }
++    }
++}
++
+ /// Placeholder before renaming.
+ const NONE: Value = Value(u32::MAX);
+ /// Scalar codes 0-255 (from [`PARKED`] up: parked scalars), SCC, VGPRs 0-255.

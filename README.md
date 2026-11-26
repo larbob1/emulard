@@ -33,6 +33,12 @@ texel layouts.
 Sources: [Belobug integer blending](https://github.com/Belobug/VIctory-Belobug-AMD/commit/86292110ff2cd2c7d4d5960a3aa40fe02bc4b415)
 and [fxceless render-target fallback](https://github.com/fxceless/victory-fork/commit/8dd30ab472697c47b141c273c2a00f8ce1c00520).
 
+Both runtime revisions also carry Belobug's tiled-shadow shader translation
+fix for 32-lane GPUs. The translator recognizes far jumps that only exit
+an empty wave and follows scalar values that pass unchanged through a
+branch join. This lets both halves of a 64-lane console wave reach the
+synchronization used for cross-lane reads. [Belobug source commit](https://github.com/Belobug/VIctory-Belobug-AMD/commit/4fd34fdd6634372b9f9a1ac791cdc86be329c0ad)
+
 ### Known blockers
 
 - Some compute shaders still fail translation. One needs synchronization
@@ -47,6 +53,22 @@ and [fxceless render-target fallback](https://github.com/fxceless/victory-fork/c
 The wave changes keep safety checks enabled. Do not force a group barrier or
 approximate divergent-wave result to make a shader appear to translate; that
 can deadlock or produce incorrect output.
+
+The baseline reports a shader's unsupported wave size before asking the host
+driver to create a pipeline. For compiler diagnostics, set
+`VICTORY_SHADER_SAVE` to a writable Windows-visible directory. The runtime
+saves the input container before translation, so a worker fault still leaves
+an input to replay.
+
+Set `VICTORY_LOG=warn,victory_gpu::pipeline=debug` to log each pipeline
+job, shader translation, driver compile, and cache operation with its
+Windows thread ID. A start event without a matching finish identifies
+the last recorded phase on that worker.
+
+Both runtime revisions accept `VICTORY_WAVE_WIDE_DIGESTS` for offline
+experiments with selected containers. Use `victory translate --pipelines`
+to check whether the driver accepts the resulting pipeline. A successful
+creation check leaves dispatch correctness and stability unverified.
 
 ## Prepare and build
 
@@ -115,6 +137,24 @@ view descriptions match, and resets the cache when recording moves to
 another command list. The diagnostic frame log counts bindings sent and
 reused. [Source commit](https://github.com/avatarmanz/VIctory-7900XTX/commit/ca1d519f18ccece3daf2b05191a43fae17ac6f91)
 
+### Experimental paired-wave refresh
+
+Prepare the paired-wave translator from [fxceless PR #854](https://github.com/fxceless/victory-fork/pull/854)
+with Emulard's Wine memory and integer blend patches.
+
+```sh
+python3 tools/build_runtime.py ../runtime-paired-wave --paired-wave-refresh
+```
+
+On a 32-lane GPU, this translator represents each 64-lane console wave
+with one host wave. Each host thread executes two logical lanes. Use
+`VICTORY_WAVE_LOCAL=idiom` to restrict per-half translation to cases where
+the translator recognizes it as exact. Use `VICTORY_WAVE_PAIRS=0` to compare
+with the paired-wave fallback disabled.
+
+Replay captured shaders with `victory translate --pipelines` before testing
+in Story Mode. Driver acceptance establishes pipeline creation.
+
 ### Replay tile mappings
 
 In a diagnostic refresh build, set `VICTORY_PAGE_TRACE` to a new writable
@@ -171,6 +211,12 @@ Set `WINE` to a wrapper for the selected Wine or Proton installation when the
 default `wine` command is not the one used to initialize the prefix. See
 [first-launch readiness](docs/first-launch.md) for smoke checks and Proton
 setup notes.
+
+The baseline reuses exact placeholders when replacing mapped physical
+pages. Under Wine it also remembers single-page placeholders left by
+separate unmaps, which can save a host call when textures stream back in.
+If Wine rejects a cached placeholder, the mapper retries with a split.
+Set `VICTORY_CACHE_PAGE_PLACEHOLDERS=0` to disable the cache on the baseline.
 
 On a memory-constrained Wine host, set `VICTORY_XMEM_BACKING_DIR` to the
 Wine-visible path of an existing private directory on a filesystem with

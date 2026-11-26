@@ -10,6 +10,7 @@ import sys
 UPSTREAM = "https://github.com/fxceless/victory-fork.git"
 REVISION = "2119b0e44c53aa9648307b0c5c73590290305b1f"
 FXCELESS_REFRESH = "d510ee4a9b635bcc345207a73ccb4c4fceb8228c"
+PAIRED_WAVE_REFRESH = "51700c6d43a3507fa65e50fe4bb64074ce706cd4"
 PATCHER = Path(__file__).resolve().with_name("apply_memory_patch.py")
 
 def run(args, cwd=None):
@@ -26,6 +27,7 @@ def main():
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--lighting-memory", action="store_true", help="apply the experimental shader page-boundary candidate")
     mode.add_argument("--fxceless-refresh", action="store_true", help="use the newer fxceless renderer with the integer blend and Wine memory fixes")
+    mode.add_argument("--paired-wave-refresh", action="store_true", help="use the paired-wave shader translator from fxceless PR #854")
     ns = ap.parse_args()
     target = ns.checkout.resolve()
     own = PATCHER.parent.parent
@@ -36,6 +38,18 @@ def main():
     try:
         run(["git", "clone", "--no-checkout", UPSTREAM, str(target)])
         run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
+        if ns.paired_wave_refresh:
+            run(["git", "fetch", "--no-tags", "origin", PAIRED_WAVE_REFRESH], target)
+            run(["git", "checkout", "--detach", PAIRED_WAVE_REFRESH], target)
+            for patch in ("belobug-integer-blend-fxceless.patch", "wine-disk-backed-memory.patch"):
+                run(["git", "apply", str(own / "patches" / patch)], target)
+            run(["git", "diff", "--check"], target)
+            if ns.build:
+                run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
+                build_binaries(target)
+            else:
+                print("Patched source prepared; compilation not attempted.")
+            return 0
         revision = FXCELESS_REFRESH if ns.fxceless_refresh else REVISION
         run(["git", "checkout", "--detach", revision], target)
         if ns.fxceless_refresh:
@@ -48,6 +62,7 @@ def main():
                 "texture-table-check.patch",
                 "render-target-bind-cache.patch",
                 "wave-wide-digest-selection.patch",
+                "belobug-wave32-tiled-shadows.patch",
                 "texture-view-coverage.patch",
                 "reuse-vacant-page-placeholders.patch",
             ):
@@ -90,6 +105,10 @@ def main():
         run(["git", "apply", str(own / "patches" / "belobug-integer-blend.patch")], target)
         run(["git", "apply", str(own / "patches" / "fxceless-shared-exponent-target.patch")], target)
         run(["git", "apply", str(own / "patches" / "wine-disk-backed-memory.patch")], target)
+        run(["git", "apply", str(own / "patches" / "wine-reuse-page-placeholders.patch")], target)
+        run(["git", "apply", str(own / "patches" / "belobug-wave32-tiled-shadows.patch")], target)
+        run(["git", "apply", str(own / "patches" / "pipeline-isolation.patch")], target)
+        run(["git", "apply", str(own / "patches" / "pipeline-worker-tracing.patch")], target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:
