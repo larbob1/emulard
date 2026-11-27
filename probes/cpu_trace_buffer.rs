@@ -214,3 +214,350 @@ mod tests {
         assert!(b.finish(90001, 400, true).is_none());
     }
 }
+
+// Process-wide capture model: one controller per runtime, bounded pending
+// records; only scalar identity/epoch in TLS. No production hooks or I/O.
+use std::cell::Cell;
+use std::collections::VecDeque;
+use std::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+
+const RUNNING: u8 = 0;
+const CAP_REACHED: u8 = 1;
+const QUEUE_FULL: u8 = 2;
+const CONCURRENT_PRESENT: u8 = 3;
+const STALE_TICKET: u8 = 4;
+const CONTENDED: u8 = 5;
+const EXHAUSTED: u8 = 6;
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn fresh_id() -> Option<u64> {
+    NEXT_ID.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+                         |n| n.checked_add(1)).ok()
+}
+
+#[derive(Clone, Copy)]
+struct Local { session: u64, thread: u64, epoch: u64 }
+thread_local! {
+    static LOCAL: Cell<Local> = const {
+        Cell::new(Local { session: 0, thread: 0, epoch: 0 })
+    };
+}
+
+struct Ticket {
+    session: u64,
+    thread: u64,
+    epoch: u64,
+    start_ns: u64,
+    kind: Kind,
+    // Cannot transfer an outstanding caller-thread observation to another
+    // thread. A ticket deliberately cannot be cloned either.
+    _local: PhantomData<Rc<()>>,
+}
+
+struct SharedCapture {
+    buffer: Buffer,
+    epoch: u64,
+    present: Option<(u64, u64)>,
+    pending: VecDeque<Capture>,
+    attempted: u64,
+    drained: u64,
+    invalid_windows: u64,
+    dropped_windows: u64,
+}
+
+struct Controller {
+    enabled: bool,
+    session: u64,
+    cap: u64,
+    queue_cap: usize,
+    stop: AtomicU8,
+    state: Mutex<SharedCapture>,
+}
+
+#[derive(Debug)]
+struct Terminal {
+    code: u8,
+    attempted: u64,
+    drained: u64,
+    invalid_windows: u64,
+    dropped_windows: u64,
+    complete: bool,
+}
+
+impl Controller {
+    fn new(enabled: bool, cap: u64, queue_cap: usize, span_cap: usize) -> Self {
+        let session = if enabled { fresh_id().unwrap_or(0) } else { 0 };
+        Self {
+            enabled: enabled && session != 0,
+            session,
+            cap: cap.clamp(1, 600),
+            queue_cap: queue_cap.clamp(1, 8),
+            stop: AtomicU8::new(if enabled && session == 0 { EXHAUSTED } else { RUNNING }),
+            state: Mutex::new(SharedCapture {
+                buffer: Buffer::new(span_cap), epoch: 1, present: None,
+                pending: VecDeque::new(), attempted: 0, drained: 0,
+                invalid_windows: 0, dropped_windows: 0,
+            }),
+        }
+    }
+
+    fn observing(&self) -> bool {
+        self.enabled && self.stop.load(Ordering::Acquire) == RUNNING
+    }
+
+    fn fail(&self, code: u8) {
+        // A late, racing loss report must not be hidden by a cap-reached
+        // status. Fault status is sticky; exact loss count may be unknown.
+        self.stop.fetch_max(code, Ordering::AcqRel);
+    }
+
+    fn producer_state(&self) -> Option<MutexGuard<'_, SharedCapture>> {
+        if !self.observing() { return None; }
+        let guard = match self.state.try_lock() {
+            Ok(g) => g,
+            Err(_) => { self.fail(CONTENDED); return None; }
+        };
+        if self.observing() { Some(guard) } else { None }
+    }
+
+    fn begin(&self, kind: Kind, start_ns: u64) -> Option<Ticket> {
+        // Disabled/stopped calls do not touch TLS or lock capture state.
+        let mut state = self.producer_state()?;
+        let local = LOCAL.with(|cell| {
+            let mut l = cell.get();
+            if l.session != self.session {
+                l = Local { session: self.session, thread: fresh_id()?, epoch: 0 };
+            }
+            l.epoch = state.epoch;
+            cell.set(l);
+            Some(l)
+        });
+        let Some(local) = local else { self.fail(EXHAUSTED); return None; };
+        if kind == Kind::PresentCall {
+            if state.present.is_some() {
+                self.fail(CONCURRENT_PRESENT);
+                return None;
+            }
+            state.present = Some((local.thread, local.epoch));
+        } else if state.buffer.owner != Some(local.thread) {
+            return None; // Not the presenting thread; no span retained.
+        }
+        Some(Ticket { session: self.session, thread: local.thread,
+                      epoch: local.epoch, start_ns, kind, _local: PhantomData })
+    }
+
+    fn finish(&self, ticket: Ticket, end_ns: u64, present_ok: bool) {
+        let Some(mut state) = self.producer_state() else { return; };
+        let local_ok = LOCAL.with(|cell| {
+            let l = cell.get();
+            l.session == ticket.session && l.thread == ticket.thread
+                && l.epoch == ticket.epoch
+        });
+        if !local_ok || ticket.session != self.session || ticket.epoch != state.epoch {
+            self.fail(STALE_TICKET);
+            return;
+        }
+        let is_present = ticket.kind == Kind::PresentCall;
+        if is_present {
+            if state.present != Some((ticket.thread, ticket.epoch)) {
+                self.fail(STALE_TICKET);
+                return;
+            }
+            state.present = None;
+            if state.buffer.owner.is_none() && (!present_ok || end_ns <= ticket.start_ns) {
+                self.fail(STALE_TICKET);
+                return;
+            }
+        }
+        state.buffer.record(ticket.thread, Span {
+            kind: ticket.kind, start_ns: ticket.start_ns, end_ns,
+        });
+        if !is_present { return; }
+        let row = state.buffer.finish(ticket.thread, end_ns, present_ok);
+        let Some(next_epoch) = state.epoch.checked_add(1) else {
+            self.fail(EXHAUSTED);
+            return;
+        };
+        state.epoch = next_epoch;
+        if let Some(row) = row {
+            state.attempted += 1; // bounded by capture cap
+            if !row.cpu_window_complete { state.invalid_windows += 1; }
+            if state.pending.len() >= self.queue_cap {
+                state.dropped_windows += 1;
+                self.fail(QUEUE_FULL);
+                return;
+            }
+            state.pending.push_back(row);
+            if state.attempted >= self.cap {
+                self.fail(CAP_REACHED);
+            }
+        }
+    }
+
+    // Ownership of one record leaves the lock before formatting or I/O.
+    // Actual integration must limit external consumer retention to one record
+    // and acknowledge successful writes before certifying terminal status.
+    fn pop(&self) -> Option<Capture> {
+        let mut state = self.state.try_lock().ok()?;
+        let row = state.pending.pop_front()?;
+        state.drained += 1;
+        Some(row)
+    }
+
+    fn terminal(&self) -> Option<Terminal> {
+        let state = self.state.try_lock().ok()?;
+        let code = self.stop.load(Ordering::Acquire);
+        if code == RUNNING || !state.pending.is_empty() { return None; }
+        Some(Terminal {
+            code, attempted: state.attempted, drained: state.drained,
+            invalid_windows: state.invalid_windows, dropped_windows: state.dropped_windows,
+            complete: code == CAP_REACHED && state.attempted == self.cap
+                && state.drained == self.cap && state.invalid_windows == 0
+                && state.dropped_windows == 0,
+        })
+    }
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    fn present(c: &Controller, start: u64, end: u64) {
+        let t = c.begin(Kind::PresentCall, start).unwrap();
+        c.finish(t, end, true);
+    }
+
+    #[test]
+    fn disabled_never_touches_locked_state_or_tls() {
+        let c = Controller::new(false, 2, 2, 8);
+        let before = LOCAL.with(|l| l.get().session);
+        let _hold = c.state.lock().unwrap();
+        assert!(c.begin(Kind::PresentCall, 1).is_none());
+        assert_eq!(c.stop.load(Ordering::Relaxed), RUNNING);
+        assert_eq!(LOCAL.with(|l| l.get().session), before);
+    }
+
+    #[test]
+    fn bounded_capture_and_drain() {
+        let c = Controller::new(true, 2, 2, 8);
+        present(&c, 1, 10);
+        let t = c.begin(Kind::Execute, 11).unwrap();
+        c.finish(t, 12, true);
+        present(&c, 19, 20);
+        present(&c, 29, 30);
+        assert!(c.begin(Kind::PresentCall, 31).is_none());
+        assert!(c.terminal().is_none());
+        let first = c.pop().unwrap();
+        assert!(first.cpu_window_complete);
+        assert_eq!(first.spans.len(), 2);
+        assert_eq!(c.pop().unwrap().sequence, 2);
+        let end = c.terminal().unwrap();
+        assert!(end.complete);
+        assert_eq!(end.code, CAP_REACHED);
+        assert_eq!(end.attempted, 2);
+        assert_eq!(end.drained, 2);
+    }
+
+    #[test]
+    fn queue_full_stops_instead_of_overwriting() {
+        let c = Controller::new(true, 600, 1, 8);
+        present(&c, 1, 10);
+        present(&c, 11, 20);
+        present(&c, 21, 30);
+        assert_eq!(c.pop().unwrap().sequence, 1);
+        assert!(c.pop().is_none());
+        let end = c.terminal().unwrap();
+        assert_eq!(end.code, QUEUE_FULL);
+        assert_eq!(end.dropped_windows, 1);
+        assert_eq!(end.attempted, 2);
+        assert!(!end.complete);
+    }
+
+    #[test]
+    fn stale_epoch_fails_closed() {
+        let c = Controller::new(true, 4, 4, 8);
+        present(&c, 1, 10);
+        let old = c.begin(Kind::Execute, 11).unwrap();
+        present(&c, 19, 20);
+        c.finish(old, 21, true);
+        c.pop().unwrap();
+        assert_eq!(c.terminal().unwrap().code, STALE_TICKET);
+        assert!(!c.terminal().unwrap().complete);
+    }
+
+    #[test]
+    fn concurrent_present_rejected_on_distinct_threads() {
+        let c = Controller::new(true, 4, 4, 8);
+        present(&c, 1, 10);
+        let held = Barrier::new(2);
+        let checked = Barrier::new(2);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let t = c.begin(Kind::PresentCall, 11).unwrap();
+                held.wait();
+                checked.wait();
+                c.finish(t, 20, true);
+            });
+            held.wait();
+            assert!(c.begin(Kind::PresentCall, 12).is_none());
+            checked.wait();
+        });
+        assert!(c.pop().is_none());
+        assert_eq!(c.terminal().unwrap().code, CONCURRENT_PRESENT);
+    }
+
+    #[test]
+    fn thread_change_does_not_reuse_old_window() {
+        let c = Controller::new(true, 2, 2, 8);
+        present(&c, 1, 10);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                assert!(c.begin(Kind::Execute, 11).is_none());
+                present(&c, 19, 20);
+                present(&c, 29, 30);
+            }).join().unwrap();
+        });
+        let first = c.pop().unwrap();
+        assert!(first.thread_changed);
+        assert!(!first.cpu_window_complete);
+        assert!(c.pop().unwrap().cpu_window_complete);
+        let end = c.terminal().unwrap();
+        assert_eq!(end.invalid_windows, 1);
+        assert!(!end.complete);
+    }
+
+    #[test]
+    fn contention_does_not_wait_and_marks_loss() {
+        let c = Controller::new(true, 3, 3, 8);
+        let held = c.state.lock().unwrap();
+        std::thread::scope(|s| {
+            s.spawn(|| assert!(c.begin(Kind::PresentCall, 1).is_none()))
+                .join().unwrap();
+        });
+        drop(held);
+        assert_eq!(c.terminal().unwrap().code, CONTENDED);
+        assert!(!c.terminal().unwrap().complete);
+    }
+
+    #[test]
+    fn wrong_session_ticket_rejected() {
+        let a = Controller::new(true, 2, 2, 8);
+        let b = Controller::new(true, 2, 2, 8);
+        let t = a.begin(Kind::PresentCall, 1).unwrap();
+        b.finish(t, 10, true);
+        assert_eq!(b.terminal().unwrap().code, STALE_TICKET);
+    }
+
+    #[test]
+    fn process_wide_bounds_clamped() {
+        let c = Controller::new(true, u64::MAX, usize::MAX, usize::MAX);
+        assert_eq!(c.cap, 600);
+        assert_eq!(c.queue_cap, 8);
+        assert_eq!(c.state.lock().unwrap().buffer.capacity, 256);
+    }
+}

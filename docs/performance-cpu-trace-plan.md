@@ -109,3 +109,36 @@ zero for absent categories), call counts and unattributed elapsed fraction.
 Outer calls include waiting and nested work; neither CPU busy time nor display
 FPS is inferred. No raw timestamps or identifiers exported. Exit 0 means
 supplied records structurally usable, 1 unavailable, 2 incomplete/invalid.
+
+## Bounded concurrent capture prototype (approved isolated model)
+
+The portable probe now also implements a process-wide controller, scalar TLS
+session/thread/epoch identity, non-transferable tickets, at most eight queued
+windows (256 spans each), and one active window, capped at 600 attempted
+windows. No per-thread span vectors or thread registry are retained. A disabled
+or stopped begin returns before touching TLS or acquiring the capture mutex.
+The proposed runtime must also check enabled before obtaining timestamps.
+Producer acquisition is try-lock only; contention stops observation rather than
+stalling gameplay. Concurrent presents, stale tickets and queue overflow stop
+capture; thread changes and invalid windows are counted. A full queue is never
+overwritten. The consumer takes ownership of one record before serialization.
+No I/O occurs inside the state model. A fault status can represent unknown
+additional loss, not an exact count of every omitted event.
+
+Terminal status is a model-only receipt: stop reason, attempted, drained,
+invalid and dropped windows. A clean cap and fully drained queue are necessary
+for complete observation; actual consumer write/flush acknowledgement and
+capture-end record are not implemented. The offline v1 summary still only
+validates supplied JSONL; it cannot certify the terminal receipt. Do not treat
+partial records from a faulted session as a complete capture. In real wiring
+limit consumer ownership to one record, stop/acknowledge in-flight tickets
+before terminal publication, and validate end-of-capture status. The model's
+try-lock deliberately sacrifices a capture under contention (including the
+consumer); overhead and a better producer design need real testing.
+
+AI2 approved the narrow wrapper ownership scope in principle; coordinator
+approval of exact prepared hunks and shared builder registration is outstanding.
+The prototype has no runtime timestamp calls, no production flags, no writer,
+and no actual runtime source changes. Compiled tests cover real-thread overlap
+and contention plus stale epochs, disabled path, caps, thread changes and
+bounded drain. CPU observation is not displayed-frame or GPU completion timing.
