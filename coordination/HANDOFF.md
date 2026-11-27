@@ -43,3 +43,6 @@ PR #22 b183b12 validates frozen #14/#17 snapshots independently; CI synthetic pe
 
 ## Replacement coordinator handoff
 P05 #25 7f7db1e synthetic passed 115 Python +4 range +6 hint +10 portable copy executions, native deferred; P21/P24 #23 c074896b synthetic passed 135 Python +4 standalone +10 portable copy executions, native active. #18/#19/#10/#21/#22 native passed (see STATUS for counts/links). #18 frozen, no merge. AI2 contract posted #12, AI3 review posted #13; all production synchronization restricted pending writer/lease/lock-order review. Next: finish #23, schedule #25 native, review exact P10 backing consumers and P12 writer publication, obtain owner matched Proton test from #18 before stacking more unmeasured candidates. All 24 IDs open; performance unmeasured.
+
+### P10/P12 handoff
+#26 47ec512 test-only alias proof, initial compile error fixed; synthetic job passed 114 Python/17 standalone Rust, portable prep final pending; schedule native after current jobs. #25 0e48e3b native active alongside #23. Existing MANY_VIEWS omissions prevent use as exact footprint; remap lock is not data writer lock. Next audit complete live mutation domains, implement synchronized publication design with AI2, review actual mapping performance data and get frozen #18 Proton smoke. No merge or gameplay result.
