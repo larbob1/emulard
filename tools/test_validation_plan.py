@@ -25,6 +25,16 @@ class ValidationPlanTests(unittest.TestCase):
                              [("0", "0"), ("1", "0"), ("0", "1"), ("1", "1")])
             self.assertEqual(run.call_count, 2)
 
+    def test_extent_validation_covers_all_stream_and_ownership_cases(self):
+        with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
+            validate_paired(Path("."))
+            names = [c.args[2] for c in suite.call_args_list if c.args[1] == "victory-gpu"]
+        self.assertEqual([n for n in names if n.startswith("pipeline_stream_")], ["pipeline_stream_"])
+        self.assertIn("streams_yield_their_shaders", names)
+        self.assertIn("pipelines_keep_their_shaders", names)
+        self.assertEqual(names.count("copy_back_mask_tests"), 4)
+        self.assertEqual(run.call_count, 2)
+
     def test_default_fails_fast(self):
         with patch("build_runtime.test_suite", side_effect=subprocess.CalledProcessError(1, ["test"])) as suite, patch("build_runtime.run") as run:
             with self.assertRaises(subprocess.CalledProcessError):

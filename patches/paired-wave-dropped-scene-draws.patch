@@ -78,7 +78,123 @@
  }
  
  /// Counts a draw or dispatch of `this` intentionally skipped or dropped
-@@ -674,87 +686,97 @@
+@@ -573,101 +585,115 @@
++// Arithmetic validation only: the caller still owns the ABI obligation
++// to supply live, readable storage for each nonempty descriptor.
++fn bytecode_extent_valid(code: &Bytecode) -> bool {
++    code.size == 0 || (!code.code.is_null()
++        && code.size <= isize::MAX as usize
++        && (code.code as usize).checked_add(code.size).is_some())
++}
++
+ /// The stage's container, if it has one.
+ fn copy(stage: &'static str, code: &Bytecode) -> Option<Arc<Shader>> {
+     if code.code.is_null() || code.size == 0 {
+         return None;
+     }
+     // SAFETY: the title passes `size` bytes of shader code.
+     Some(shader(stage, unsafe {
+         std::slice::from_raw_parts(code.code, code.size)
+     }))
+ }
+ 
+ fn hand_out(
+     shaders: Vec<Arc<Shader>>,
+     #[cfg(windows)] graphics: Option<Box<host::GraphicsState>>,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     tracing::trace!(?shaders, "pipeline state");
+     #[cfg(windows)]
+     let host = Arc::new(make::Pending::new(shaders.clone(), graphics));
+     #[cfg(windows)]
+     make::early(&host);
+     #[cfg(windows)]
+     let builder = of_builder(&shaders);
+     #[cfg(windows)]
+     if builder {
+         // Another stage: the group is looked at again at its next dispatch.
+         let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
+         b.pipelines.push(host.clone());
+         b.whole = false;
+     }
+     let pipeline = Box::new(Pipeline {
+         object: Object::new(&FUNCTIONS),
+         packet: [0; 8],
+         #[cfg(windows)]
+         host,
+         #[cfg(windows)]
+         builder,
+         shaders,
+         bound: std::sync::atomic::AtomicBool::new(false),
+     });
+     object::hand_out(PIPELINE, pipeline, iid, &PIPELINE_IIDS, out)
+ }
+ 
+ /// Device method.
+ pub(crate) extern "system" fn create_graphics(
+     _: This,
+     desc: *const GraphicsHead,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
++    if !desc.stages.iter().all(bytecode_extent_valid) {
++        return E_INVALIDARG;
++    }
+     let stages = GRAPHICS_STAGES.iter().zip(&desc.stages);
+     let shaders = stages.filter_map(|(s, c)| copy(s, c)).collect();
+     hand_out(
+         shaders,
+         #[cfg(windows)]
+         None,
+         iid,
+         out,
+     )
+ }
+ 
+ /// Device method.
+ pub(crate) extern "system" fn create_compute(
+     _: This,
+     desc: *const ComputeHead,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
++    if !bytecode_extent_valid(&desc.stage) {
++        return E_INVALIDARG;
++    }
+     hand_out(
+         copy("compute", &desc.stage).into_iter().collect(),
+         #[cfg(windows)]
+         None,
+         iid,
+         out,
+     )
+ }
+ 
+ /// Device method 0x1f0: the plain compute description plus console
+ /// extensions `(desc, extension count, extensions, iid, out)`.
+ /// shortcut: the extensions (console shader settings) are ignored, as is
+ /// the rest of the description.
+ pub(crate) extern "system" fn create_compute_x(
+     this: This,
+     desc: *const ComputeHead,
+     _extensions: u32,
+     _extended: *const u8,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     create_compute(this, desc, iid, out)
+ }
+ 
+@@ -674,87 +700,102 @@
  /// A pipeline described as a stream: its size and the subobjects, each a
  /// type then its data, padded to 8 bytes.
  #[repr(C)]
@@ -128,7 +244,9 @@
          return E_INVALIDARG;
      };
 -    if desc.stream.is_null() {
-+    if desc.stream.is_null() || desc.size > isize::MAX as usize {
++    if desc.stream.is_null() || desc.size > isize::MAX as usize
++        || (desc.stream as usize).checked_add(desc.size).is_none()
++    {
          return E_INVALIDARG;
      }
      let mut shaders = Vec::new();
@@ -164,6 +282,9 @@
 +            // SAFETY: the whole subobject fits, including bytecode at +8.
 +            // Streams may arrive at an unaligned address.
 +            let code = unsafe { desc.stream.add(at + 8).cast::<Bytecode>().read_unaligned() };
++            if !bytecode_extent_valid(&code) {
++                return E_INVALIDARG;
++            }
 +            shaders.extend(copy(stage, &code));
          }
          #[cfg(windows)]
@@ -182,7 +303,53 @@
      )
  }
  
-@@ -885,6 +907,70 @@
+@@ -885,6 +926,116 @@
++    #[test]
++    fn pipeline_stream_rejects_invalid_shader_extent() {
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        for (ptr, len) in [(0usize, 1usize), (1, isize::MAX as usize + 1), (usize::MAX - 1, 2)] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..24].copy_from_slice(&(len as u64).to_le_bytes());
++            assert_eq!(stream_result(&bytes, 24), (E_INVALIDARG, std::ptr::null()));
++        }
++        let desc = StreamDesc { size: 8, stream: (usize::MAX - 3) as *const u8 };
++        let mut p = std::ptr::null();
++        assert_eq!(create_stream(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++        assert!(p.is_null());
++    }
++
++    #[test]
++    fn pipeline_stream_plain_creators_reject_invalid_shader_extents() {
++        for (ptr, len) in [(0usize, 1usize), (1, isize::MAX as usize + 1), (usize::MAX - 1, 2)] {
++            let invalid = || Bytecode { code: ptr as *const u8, size: len };
++            let empty = || Bytecode { code: std::ptr::null(), size: 0 };
++            let desc = GraphicsHead {
++                root: std::ptr::null(),
++                stages: [empty(), empty(), empty(), empty(), invalid()],
++            };
++            let mut p = std::ptr::null();
++            assert_eq!(create_graphics(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert!(p.is_null());
++            let compute = ComputeHead { root: std::ptr::null(), stage: invalid() };
++            assert_eq!(create_compute(std::ptr::null(), &compute, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert_eq!(create_compute_x(std::ptr::null(), &compute, 0, std::ptr::null(), &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert!(p.is_null());
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_preserves_absent_shader_stages() {
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        let (hr, p) = stream_result(&bytes, 24);
++        assert_eq!(hr, S_OK);
++        assert!(shaders(p).is_empty());
++        assert_eq!(release(p), 0);
++        let empty = Bytecode { code: usize::MAX as *const u8, size: 0 };
++        assert!(bytecode_extent_valid(&empty));
++    }
++
 +    fn stream_result(bytes: &[u8], declared: usize) -> (HRESULT, This) {
 +        let desc = StreamDesc { size: declared, stream: bytes.as_ptr() };
 +        let mut p = std::ptr::null();

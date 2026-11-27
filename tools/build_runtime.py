@@ -99,7 +99,7 @@ def validate_paired(target, *, keep_going=False):
             suite("victory-gpu", name, env=env)
     for name in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
         suite("victory-gpu", name)
-    for name in ("shader_cache_publication_failure_keeps_runtime_translation", "shader_identity_preserves_stage_and_same_stage_sharing", "wait_budget_order_tests", "queue_promotion_tests", "linked_pair_singleflight_tests", "staging_near_size_tests", "pipeline_stream_rejects", "pipeline_stream_reads_unaligned_bytecode_and_preserves_unknown_stop", "streams_yield_their_shaders"):
+    for name in ("shader_cache_publication_failure_keeps_runtime_translation", "shader_identity_preserves_stage_and_same_stage_sharing", "wait_budget_order_tests", "queue_promotion_tests", "linked_pair_singleflight_tests", "staging_near_size_tests", "pipeline_stream_", "streams_yield_their_shaders", "pipelines_keep_their_shaders"):
         suite("victory-gpu", name)
     # Fresh processes isolate cached experiment flags, including mixed modes.
     for sparse, avx in (("0", "0"), ("1", "0"), ("0", "1"), ("1", "1")):
