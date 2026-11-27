@@ -35,8 +35,9 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 
 ## Current state
 
-Phases 1 and 2: opt-in implementation candidates committed; no runtime
-compilation or gameplay measurements independently verified here.
+Phases 1 and 2: opt-in implementation candidates committed. Earlier Windows
+runs compiled the HLE test executable but failed the split/restore regression;
+full release/diagnostic compilation and gameplay remain unverified.
 Phase 3: short-lock snapshot candidate and standalone range-gate prototype.
 The global mapping lock remains the production safety mechanism.
 Phase 4: opt-in GPU copy-back scan/merge and idle snapshot budget candidates;
@@ -96,3 +97,7 @@ P05/P06/P24: direct physical mapping now attempts the existing coalesce-or-page 
 P06: checked unmap candidate preserves the HLE view index on host unmap refusal, restores the invalidated renderer view census, and reports failed neighboring reconstruction instead of silently succeeding. Known renderer-guarded blocks are reopened before invalidation; this may increase remap work. Added injected host refusal to the physical mapping fixture. Full rollback across multiple views and failed map/commit cleanup remain open. Runtime verification pending.
 
 - [Windows CI 45936873951](https://github.com/larbob1/emulard/actions/runs/45936873951), commit `e5d1e38c9c13e76be11aae9c49268589e2b8de9c`, all three mapping flags off: failed `physical_pages_map_alias_and_unmap` at `xmem.rs:1659:9`. Reconstructing the pinned source and its xmem transformations identifies the assertion as restoring the original three-page contiguous mapping after a split. The coalesce-or-page fallback in `e1f7501c187b3582f0532d919c9b65f960d429b7` targets precisely that operation. [Synthetic and portable-copy CI](https://github.com/larbob1/emulard/actions/runs/45937093784) passed on that commit. The Windows fix and checked-unmap candidate still require runtime validation; P01/P05/P06/P24 remain unresolved.
+
+### Reverse alias indexing candidate (isolated)
+
+- [dev/performance-phase6-alias-index](https://github.com/larbob1/emulard/tree/dev/performance-phase6-alias-index), commit `3b63d02e4e6874a53acd1827e220282bf90217b7`, ports the existing fxceless ordered-set reverse alias indexes to paired-wave in both HLE and GPU. Exact source anchors checked against pinned upstream; a new reverse-index regression and Linux source preparation job are included. Not merged into Phase 6 while the Windows mapping stabilization run is active. P05/P08/P18 remain unresolved: full interval tracking, replay verification, matched benchmarks and native runtime checks still required. See the candidate's `docs/performance-alias-index.md`.
