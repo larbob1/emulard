@@ -36,6 +36,22 @@ class FrameReportTests(unittest.TestCase):
     def test_empty_and_zero(self):
         self.assertEqual(summarize(["unknown", sample(0)])["samples"], 0)
 
+    def test_long_frame_telemetry_separate_from_intervals(self):
+        line = ("private prefix textures: refresh 450.0 ms (400.0 waiting for memory to hold still), "
+                "remapping: 50 calls 500.0 ms (20.0 waiting for readers; of it the system's "
+                "unmapping 100.0, its mapping 350.0, committing 0.0, our own notes of the change "
+                "30.0; 3 views cut, 1.0 MB of them mapped again; 10 placeholders reused, 0 reuse fallbacks)")
+        alias = ("page mappings of the title's queues per second: 5 calls for 20 pages, "
+                 "10 of them as they were, 4 views mapped, 8.0 ms")
+        result = summarize([sample(), line, alias])
+        self.assertEqual(result["samples"], 1)
+        self.assertEqual(result["long_frame_samples"], 1)
+        self.assertEqual(result["long_frame_remapping"]["map_ms"]["median"], 350)
+        self.assertEqual(result["long_frame_remapping"]["refresh_wait_ms"]["median"], 400)
+        self.assertEqual(result["alias_rates_per_second"]["same"]["median"], 10)
+        self.assertNotIn("private prefix", str(result))
+        self.assertEqual(summarize([line])["long_frame_samples"], 1)
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 
