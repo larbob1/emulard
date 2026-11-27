@@ -224,13 +224,14 @@ mod tests {
 #[derive(Default)]
 pub(crate) struct Working {
     enabled: bool,
+    attempted: bool,
     dirty: bool,
     unknown: bool,
     bytes: u64,
 }
 impl Working {
     pub(crate) fn new(enabled: bool) -> Self { Self { enabled, ..Default::default() } }
-    pub(crate) fn begin(&mut self) { if self.enabled { self.dirty = true; } }
+    pub(crate) fn begin(&mut self) { if self.enabled { self.attempted = true; } }
     pub(crate) fn unknown(&mut self) { if self.enabled { self.dirty = true; self.unknown = true; } }
     pub(crate) fn inserted(&mut self, bytes: usize, replaced: bool) {
         if !self.enabled { return; }
@@ -246,11 +247,27 @@ impl Working {
         if let Some(next) = self.bytes.checked_sub(bytes as u64) { self.bytes = next; }
         else { self.unknown(); }
     }
-    pub(crate) fn finish(&mut self, unique: usize, interrupted: bool, publication: &Publication) {
-        if !self.enabled || !self.dirty { return; }
-        self.dirty = false;
-        self.unknown |= interrupted;
-        publication.publish_serialized(self.bytes, unique as u64, !self.unknown);
+    pub(crate) fn needs_finish(&self) -> bool {
+        self.enabled && (self.attempted || self.dirty)
+    }
+    // A known unchanged attempt does not create a new generation. An
+    // interrupted attempt may have changed the host before bookkeeping.
+    pub(crate) fn take_completed(&mut self, interrupted: bool) -> Option<(u64, bool)> {
+        if !self.needs_finish() { return None; }
+        let attempted = std::mem::take(&mut self.attempted);
+        let dirty = std::mem::take(&mut self.dirty);
+        if interrupted && (attempted || dirty) {
+            self.unknown = true;
+        } else if !dirty {
+            return None;
+        }
+        Some((self.bytes, !self.unknown))
+    }
+    #[cfg(test)]
+    fn finish(&mut self, unique: usize, interrupted: bool, publication: &Publication) {
+        if let Some((bytes, valid)) = self.take_completed(interrupted) {
+            publication.publish_serialized(bytes, unique as u64, valid);
+        }
     }
 }
 #[cfg(test)]
@@ -261,6 +278,7 @@ mod working_tests {
         let p = Publication::default();
         let mut w = Working::new(false);
         w.begin(); w.inserted(PAGE as usize,false); w.unknown(); w.removed(PAGE as usize,true);
+        assert!(!w.needs_finish());
         w.finish(0,false,&p);
         assert_eq!(p.sample(),Err(Unavailable::Initial));
         assert_eq!(w.bytes,0);
@@ -293,4 +311,39 @@ mod working_tests {
             assert_eq!(p.sample(),Err(Unavailable::Invalid));
         }
     }
+    #[test]
+    fn known_unchanged_attempt_does_not_publish() {
+        let p = Publication::default();
+        let mut w = Working::new(true);
+        assert!(!w.needs_finish());
+        w.begin();
+        assert!(w.needs_finish());
+        w.finish(0,false,&p);
+        assert_eq!(p.sample(),Err(Unavailable::Initial));
+        assert!(!w.needs_finish());
+        w.begin(); w.inserted(PAGE as usize,false); w.finish(1,false,&p);
+        let old = p.sample().unwrap();
+        w.begin(); w.finish(1,false,&p);
+        assert_eq!(p.sample(),Ok(old));
+        assert!(!w.needs_finish());
+    }
+    #[test]
+    fn interruption_before_bookkeeping_is_sticky() {
+        let p = Publication::default();
+        let mut w = Working::new(true);
+        w.begin(); w.finish(0,true,&p);
+        assert_eq!(p.sample(),Err(Unavailable::Invalid));
+        assert!(!w.needs_finish());
+        w.begin(); w.inserted(PAGE as usize,false); w.finish(1,false,&p);
+        assert_eq!(p.sample(),Err(Unavailable::Invalid));
+    }
+    #[test]
+    fn read_only_interruption_does_not_create_publication() {
+        let p = Publication::default();
+        let mut w = Working::new(true);
+        assert!(!w.needs_finish());
+        w.finish(0,true,&p);
+        assert_eq!(p.sample(),Err(Unavailable::Initial));
+    }
+
 }
