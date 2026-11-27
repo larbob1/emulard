@@ -5,7 +5,8 @@ behavior is disabled unless `VICTORY_MAP_DIFF=1` is set.
 
 - Complete aligned direct physical mapping requests compare requested
   backing section and page index with the live view table. Only changed
-  spans are unmapped and rebuilt. Unknown pages keep the old path.
+  spans are unmapped and rebuilt. Unknown pages and wholly changed
+  requests keep the old path, preserving contiguous mapping behavior.
 - Disjoint, fully resolved aligned GPU alias requests snapshot source
   slices and use the same diff path. Overlapping or incomplete sources
   retain the previous semantics.
