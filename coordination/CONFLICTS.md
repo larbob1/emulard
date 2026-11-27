@@ -13,3 +13,5 @@ Post conflict in your issue with P-ID, paths/symbols, competing claim, proposed 
 - #18 and #22 frozen exact snapshots; #23 separate follow-up. No branch merges authorized. #23 and #25 native succeeded; #26 and #29 native active in separate CI groups. #29 is an isolated child of #18, not a merge or replacement.
 
 - AI4 #27 collects local evidence; AI3 retains reporting schema/acceptance authority. No production changes by AI4 without a new coordinator claim. Read-only title protection mandatory; no raw logs or private paths in GitHub.
+
+- P11 #32 review-only guard proposal: AI1 retains mapping lock contract; AI2 reviews actual staging upload/refresh/submission/fence ownership. No production application before agreement and native race validation. Existing short-lock flag remains off for #18 control.

@@ -57,3 +57,5 @@ AI4 #27 assigned local evidence collection, with read-only title isolation, supe
 
 ### P16/P03/P13/P14 follow-up
 #30 de34a244 native active, synthetic passed; #31 be1e4003 exact prepared preview checks passed both jobs. Caller/feature/schema review remains, no production registration. AI4 historical loading/menu exit 3, translator warnings; approved local toolchain in place, exact #18 build in progress per report. Prioritize verified rendering before measuring optimization. Review #26/#29/#30 native and actual #18 launch; texture preparation lead needs matched evidence. No merges or gameplay result.
+
+#32 review-only short-lock publication proposal; prepared anchors passed. Do not enable or register until AI2 staging/lock/fence review and native race tests. Continue #18 actual rendering validation and native #26/#29/#30; AI2 threaded retry snapshot after current jobs. No new gameplay evidence.
