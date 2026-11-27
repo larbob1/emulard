@@ -37,6 +37,25 @@ def run_stage(label, args, cwd):
                 if empty:
                     empty_tests.add(empty[1].decode("ascii"))
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
+                for phrase, category in (
+                    (b"panicked at", "runtime test panic"),
+                    (b"test result: failed", "runtime test assertion failure"),
+                    (b"status_access_violation", "runtime access violation"),
+                    (b"0xc0000005", "runtime access violation"),
+                    (b"stack overflow", "stack overflow"),
+                    (b"failed to run custom build command", "dependency build failure"),
+                    (b"linking with", "linker failure"),
+                    (b"failed to get", "dependency fetch failure"),
+                    (b"failed to download", "dependency download failure"),
+                    (b"could not compile", "compilation failure"),
+                    (b"no space left", "insufficient disk space"),
+                    (b"out of memory", "out of memory"),
+                    (b"test failed", "test process failure"),
+                    (b"error: aborting", "compiler aborted"),
+                    (b"error: process didn't exit successfully", "child process failure"),
+                ):
+                    if phrase in line.lower():
+                        categories.add(category)
                 if b"error[E0425]" in line:
                     unresolved.update(re.findall(rb"\x60([A-Za-z_][A-Za-z_0-9]*)\x60", line))
                 location = re.search(rb"--> (crates[\\/][A-Za-z0-9_-]+[\\/]src[\\/][A-Za-z0-9_\\/.-]+\.rs):([0-9]+):([0-9]+)", line)
@@ -75,7 +94,7 @@ def run_stage(label, args, cwd):
             if patch_locations:
                 print("Patch context locations: " + ", ".join(sorted(patch_locations)))
             if categories:
-                print("Preparation failure categories: " + ", ".join(sorted(categories)))
+                print("Failure categories: " + ", ".join(sorted(categories)))
             if patches:
                 print("Patch names mentioned: " + ", ".join(sorted(patches)))
             if preparation:

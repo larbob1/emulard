@@ -3,6 +3,9 @@ name: Paired-wave performance runtime validation
 on:
   push:
     branches: ['dev/performance-phase6']
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
   workflow_dispatch:
 
 permissions:

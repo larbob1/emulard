@@ -73,3 +73,9 @@ P08: ported the existing tile replay fixture and optional local mapping trace to
 P02/P03: added local matched-pair aggregation and allowlisted cumulative counters. Real gameplay measurements and critical-path timing are not available. Use at least three matched pairs, with visual scene confirmation by the operator.
 
 P01/P24: the cumulative paired-wave test runner now requires at least one passing test per selected suite and reports the failing suite. A zero-test filter is a failure, not validation. Full Windows build/test results and Proton execution remain outstanding.
+
+### Stabilization evidence
+
+- [Windows runtime CI 45936234001](https://github.com/larbob1/emulard/actions/runs/45936234001): after the LF normalization fix, pinned source preparation and toolchain checks passed. The subsequent runtime test/build stage failed (exit 1); no specific error code was retained by that run. The failing stage is not resolved.
+- [Synthetic CI 45936436022](https://github.com/larbob1/emulard/actions/runs/45936436022) for commit `69f7f49c36eb09b885f82bfb7aaf93fee7c3f0ae`: 101 Python tests and four standalone Rust tests passed. This includes CRLF patch handling, replay patcher, report aggregation and nonempty suite enforcement. The full runtime is still unverified.
+- P01/P24 remain open; P02/P03/P08 have candidates, not completed acceptance. P04–P07, P09–P17, P18–P23 remain as listed in the table. No FPS result or closure is claimed.
