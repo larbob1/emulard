@@ -104,3 +104,7 @@ P06: checked unmap candidate preserves the HLE view index on host unmap refusal,
 
 - [Alias index synthetic CI 45937502413](https://github.com/larbob1/emulard/actions/runs/45937502413), commit `3b63d02e4e6874a53acd1827e220282bf90217b7`: 107 Python tests, four standalone range-gate tests and ten portable copy helper test executions passed; native reverse-index regression and performance remain unverified.
 - P06/P24: reviewed the earlier range-diff preflight against the existing partial-source fixture. A wholly absent first source page still fails without changing a disjoint destination; a valid prefix followed by a missing page now falls back to the established alias mapper, preserving partial-map semantics. The existing fixture is retained. CI now records each validation group's pass/fail with its experiment switches, including both build profiles. Windows jobs queue rather than cancel an active run. No item closed; runtime results pending.
+
+### Mapping hot-path candidate
+
+P05/P08/P11/P15: isolated opt-in contiguous changed-span batching and a guarded, coverage-only texture residency estimate. Direct title-memory reads retain existing host checks; no changed scatter batching or full placeholder tracking implemented. Regression cases and independent Windows workflow included; results pending. See `docs/performance-mapping-hotpath.md`.
