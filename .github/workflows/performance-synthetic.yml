@@ -29,7 +29,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-graphics-validation' || github.head_ref == 'dev/performance-phase6-graphics-validation'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-graphics-validation-mask' || github.head_ref == 'dev/performance-phase6-graphics-validation-mask'
     steps:
       - uses: actions/checkout@v4
         with:

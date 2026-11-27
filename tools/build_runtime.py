@@ -101,6 +101,10 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-gpu", name)
     for name in ("shader_cache_publication_failure_keeps_runtime_translation", "shader_identity_preserves_stage_and_same_stage_sharing", "wait_budget_order_tests", "queue_promotion_tests", "linked_pair_singleflight_tests", "staging_near_size_tests", "pipeline_stream_rejects", "pipeline_stream_reads_unaligned_bytecode_and_preserves_unknown_stop", "streams_yield_their_shaders"):
         suite("victory-gpu", name)
+    # Fresh processes isolate cached experiment flags, including mixed modes.
+    for sparse, avx in (("0", "0"), ("1", "0"), ("0", "1"), ("1", "1")):
+        env = dict(os.environ, VICTORY_BACK_SPARSE_MERGE=sparse, VICTORY_BACK_AVX2=avx)
+        suite("victory-gpu", "copy_back_mask_tests", env=env)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
