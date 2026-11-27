@@ -57,6 +57,15 @@ class BenchmarkPairsTests(unittest.TestCase):
             self.assertEqual(duplicate.returncode, 1)
             self.assertNotIn(directory, duplicate.stdout)
 
+    def test_pairs_preserve_scatter_counter_observations(self):
+        label = "scatter lock batch totals"
+        a = summarize([sample()])
+        b = summarize([sample(), label + " batches=2 pages=70 failures=0"])
+        row = aggregate([(a, b)])["runs"][0]
+        self.assertNotIn(label, row["baseline_latest_cumulative_counters"])
+        self.assertEqual(row["candidate_latest_cumulative_counters"][label]["pages"], 70)
+        self.assertEqual(row["candidate_cumulative_counter_observations"][label]["valid_records"], 1)
+
     def test_empty_input(self):
         with self.assertRaises(ValueError):
             aggregate([])

@@ -189,6 +189,22 @@ class FrameReportTests(unittest.TestCase):
         result = summarize(["alias direct run totals attempts=2 hits=1", "alias direct run totals attempts=4 hits=3"])
         self.assertEqual(result["latest_cumulative_counters"]["alias direct run totals"], {"attempts": 4, "hits": 3})
 
+    def test_scatter_lock_cumulative_quality(self):
+        label = "scatter lock batch totals"
+        lines = ["private scatter lock batch totals batches=1 pages=64 failures=0",
+                 "scatter lock batch totals batches=2 pages=75 failures=1",
+                 "scatter lock batch totals batches=4 pages=120",
+                 "scatter lock batch totals batches=4 pages=1.5 failures=1",
+                 "scatter lock batch totals batches=4 pages=120 pages=121 failures=1",
+                 "scatter lock batch totals batches=1 pages=2 failures=0"]
+        result = summarize(lines)
+        self.assertEqual(result["latest_cumulative_counters"][label],
+                         {"batches": 1, "pages": 2, "failures": 0})
+        self.assertEqual(result["cumulative_counter_observations"][label],
+                         {"valid_records": 3, "invalid_records": 3, "nonmonotonic_records": 1})
+        self.assertNotIn("private", str(result))
+        self.assertIn("not host syscalls", result["cumulative_counter_note"])
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

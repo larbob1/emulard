@@ -150,18 +150,31 @@ COUNTERS = {
     "mapping diff run totals": ("runs", "pages"),
     "texture view estimate hits": ("hits",),
     "alias direct run totals": ("attempts", "hits"),
+    "scatter lock batch totals": ("batches", "pages", "failures"),
 }
-def update_counters(latest, line):
+def update_counters(latest, line, quality=None):
     for message, fields in COUNTERS.items():
         if message not in line:
             continue
+        record = (quality.setdefault(message, {"valid_records": 0, "invalid_records": 0,
+                                               "nonmonotonic_records": 0})
+                  if quality is not None else None)
         values = {}
         for field in fields:
-            match = re.search(rf"\b{field}=([0-9]+)\b", line)
-            if match:
-                values[field] = int(match[1])
-        if len(values) == len(fields):
-            latest[message] = values
+            matches = re.findall(rf"(?:^|\s){field}=([0-9]+)(?=\s|$)", line)
+            if len(matches) == 1:
+                values[field] = int(matches[0])
+        if len(values) != len(fields):
+            if record is not None:
+                record["invalid_records"] += 1
+            continue
+        if record is not None:
+            record["valid_records"] += 1
+            previous = latest.get(message)
+            if previous and any(values[key] < previous[key] for key in fields):
+                record["nonmonotonic_records"] += 1
+        latest[message] = values
+
 
 def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     if not isfinite(target_fps) or not 0.001 <= target_fps <= 10000:
@@ -174,6 +187,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
+    counter_quality = {}
     individual_frames = []
     batches_seen = invalid_batches = 0
     detail_active = False
@@ -183,7 +197,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     usual_remaining = long_remaining = 0
     seen_long_numbers = set()
     for line in lines:
-        update_counters(cumulative, line)
+        update_counters(cumulative, line, counter_quality)
         if "frame times:" in line:
             detail_header_seen = True
             detail_active = False
@@ -260,6 +274,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
     detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
+                "cumulative_counter_observations": counter_quality,
+                "cumulative_counter_note": "Latest observed sampled process totals, including warmup; not exact window totals. Missing records are unknown. Nonmonotonic observations may reflect reset or concurrent log order. Scatter batches/pages/failures are logical operations, not host syscalls.",
                 "critical_path_evidence": critical_evidence(usual_details, long_details, expected_usual, expected_long, unanchored, rejected),
                 "interval_sample_quality": {"seen": seen, "skipped": skipped_intervals,
                     "invalid_after_warmup": invalid_intervals, "used": len(rows)},
