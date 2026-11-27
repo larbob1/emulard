@@ -1,0 +1,28 @@
+name: AI1 isolated first-slice native validation
+
+on:
+  push:
+    branches: [dev/performance-phase6-ai1-compare-first-slice-validation]
+    paths:
+      - 'tools/validate_ai1_compare_first_slice.py'
+      - 'tools/test_validate_ai1_compare_first_slice.py'
+      - '.github/workflows/ai1-compare-first-slice.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-first-slice:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate runner contract
+        run: python tools/test_validate_ai1_compare_first_slice.py
+      - name: Run isolated native regression and paired-wave checks
+        run: python tools/validate_ai1_compare_first_slice.py
