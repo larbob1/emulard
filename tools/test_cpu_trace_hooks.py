@@ -42,7 +42,7 @@ class CpuTraceHookTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([str(binary), "bridge_tests::"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"test result: ok\. 3 passed; 0 failed;")
+            self.assertRegex(result.stdout, r"test result: ok\. 7 passed; 0 failed;")
 
 if __name__ == "__main__":
     unittest.main()

@@ -204,3 +204,30 @@ The fail-closed try-lock may abort under writer contention; no speed claim.
 No actual full runtime compile or Proton validation yet. Exact hunks and
 builder registration require D09 coordinator approval; AI2 narrow wrapper
 scope consent is recorded in #13.
+
+## D09 startup review revision
+
+In response to coordinator comment 7210531461, the review-only bridge now
+initializes explicitly at apps/victory/src/run.rs::run after loader setup and
+before spawn_main, through diagnostic Windows-only GPU/HLE re-exports. The
+five prior replacements remain, plus two startup/re-export anchors. No Cargo
+manifest change: HLE diagnostics already propagates victory-gpu/diagnostics.
+Hooks only call OnceLock::get, never get_or_init; even concurrent initialization
+returns no observation. Startup preflights an absolute destination with existing
+canonical parent outside canonical title root, rejects existing final/partial
+files, opens a new partial, then spawns a single writer and waits for a readiness
+handshake (2s receive deadline). Failed preflight, spawn or handshake means no
+capture installed. No filesystem or thread-start operations in timing hooks.
+External enforced read-only title isolation remains mandatory: canonical path
+checks are not a general defense against directory races, all Windows volume
+aliases or hostile filesystem changes. Operator must choose a fresh local
+writable capture directory, never a title directory. Output ownership, no
+overwrite, incomplete refusal and prior bounded model unchanged. Capture still
+starts with the first successful present boundary after startup, not a selected
+steady-state gameplay window. Worker polling deadline is not an OS I/O timeout.
+Exact prepared source and caller context still require coordinator/AI4 review;
+no applied runtime or shared builder change in this revision. Proposed builder
+registration after all paired-wave patchers and before git diff --check; use
+preview against exact frozen #18, apply only on unique approved candidate after
+review, then validate both profiles and nonempty CPU trace tests. No changes to
+#18, scheduling, legacy counters or any other agent's source.

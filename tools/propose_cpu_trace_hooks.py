@@ -29,9 +29,28 @@ REPLACEMENTS = [
     [
         "lib.rs",
         "#[cfg(windows)]\npub mod framelog;",
-        "#[cfg(windows)]\npub mod framelog;\n#[cfg(all(windows, feature = \"diagnostics\"))]\nmod cpu_trace;"
-    ]
+        "#[cfg(windows)]\npub mod framelog;\n#[cfg(all(windows, feature = \"diagnostics\"))]\nmod cpu_trace;\n#[cfg(all(windows, feature = \"diagnostics\"))]\npub use cpu_trace::initialize as initialize_cpu_trace;"
+    ],
+[
+    "hle_lib.rs",
+    "pub use victory_gpu::console;",
+    "pub use victory_gpu::console;\n#[cfg(all(windows, feature = \"diagnostics\"))]\npub use victory_gpu::initialize_cpu_trace;"
+],
+[
+    "app_run.rs",
+    "    // SAFETY: imports are bound; from here on we run title code.\n    let main = unsafe { Arc::new(image).spawn_main(dlls)? };",
+    "    #[cfg(feature = \"diagnostics\")]\n    victory_hle::initialize_cpu_trace(title_dir);\n    // SAFETY: imports are bound; from here on we run title code.\n    let main = unsafe { Arc::new(image).spawn_main(dlls)? };"
 ]
+]
+
+SOURCE_PATHS = {
+    "queue.rs": "crates/victory-gpu/src/queue.rs",
+    "frame.rs": "crates/victory-gpu/src/frame.rs",
+    "lib.rs": "crates/victory-gpu/src/lib.rs",
+    "hle_lib.rs": "crates/victory-hle/src/lib.rs",
+    "app_run.rs": "apps/victory/src/run.rs",
+    "cpu_trace.rs": "crates/victory-gpu/src/cpu_trace.rs",
+}
 
 def preview(files, model, bridge):
     changed = dict(files)
@@ -49,11 +68,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prepared_root", type=Path)
     args = parser.parse_args()
-    root = args.prepared_root / "crates" / "victory-gpu" / "src"
+    root = args.prepared_root
     own = Path(__file__).resolve().parents[1]
-    files = {name: (root / name).read_text(encoding="utf-8")
-             for name in ("queue.rs", "frame.rs", "lib.rs")}
-    if (root / "cpu_trace.rs").exists():
+    files = {name: (root / path).read_text(encoding="utf-8")
+             for name, path in SOURCE_PATHS.items() if name != "cpu_trace.rs"}
+    if (root / SOURCE_PATHS["cpu_trace.rs"]).exists():
         parser.error("cpu_trace.rs already exists")
     try:
         changed = preview(files, (own / "probes/cpu_trace_buffer.rs").read_text(),
@@ -61,7 +80,7 @@ def main():
     except ValueError as exc:
         parser.error(str(exc))
     for name, text in changed.items():
-        prefix = "crates/victory-gpu/src/" + name
+        prefix = SOURCE_PATHS[name]
         print("".join(difflib.unified_diff(files.get(name, "").splitlines(True),
               text.splitlines(True), fromfile="a/" + prefix if name in files else "/dev/null",
               tofile="b/" + prefix)), end="")
