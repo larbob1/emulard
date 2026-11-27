@@ -194,7 +194,7 @@
      create_compute(this, desc, iid, out)
  }
  
-@@ -674,87 +700,104 @@
+@@ -674,87 +700,107 @@
  /// A pipeline described as a stream: its size and the subobjects, each a
  /// type then its data, padded to 8 bytes.
  #[repr(C)]
@@ -249,7 +249,10 @@
 +    {
          return E_INVALIDARG;
      }
-     let mut shaders = Vec::new();
+-    let mut shaders = Vec::new();
++    // Validate the recognized stream prefix before interning any shader.
++    // The global shader table retains containers for the whole process.
++    let mut bytecodes = Vec::new();
      #[cfg(windows)]
      let mut graphics = host::GraphicsState::default();
      let mut at = 0;
@@ -285,7 +288,7 @@
 +            if !bytecode_extent_valid(&code) {
 +                return E_INVALIDARG;
 +            }
-+            shaders.extend(copy(stage, &code));
++            bytecodes.push((stage, code));
          }
          #[cfg(windows)]
          // SAFETY: a whole subobject of this kind lies at `at`.
@@ -299,6 +302,7 @@
 +        }
          at += size;
      }
++    let shaders = bytecodes.iter().filter_map(|(stage, code)| copy(stage, code)).collect();
      hand_out(
          shaders,
          #[cfg(windows)]
@@ -308,7 +312,7 @@
      )
  }
  
-@@ -885,6 +928,186 @@
+@@ -885,6 +931,210 @@
 +    #[cfg(windows)]
 +    #[test]
 +    fn pipeline_stream_rejects_invalid_input_offsets_and_target_count() {
@@ -377,6 +381,30 @@
 +            assert!(!p.is_null());
 +            assert_eq!(release(p), 0);
 +        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejected_suffix_does_not_intern_valid_prefix() {
++        let code = b"synthetic rejected pipeline prefix P16 20261127";
++        let mut bytes = [0u8; 32];
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        bytes[8..16].copy_from_slice(&(code.as_ptr() as u64).to_le_bytes());
++        bytes[16..24].copy_from_slice(&(code.len() as u64).to_le_bytes());
++        // A second recognized shader header without its payload.
++        bytes[24..28].copy_from_slice(&2u32.to_le_bytes());
++        let contains = || {
++            SHADERS.lock().unwrap_or_else(|e| e.into_inner())
++                .as_ref().is_some_and(|table| table.values().any(|s|
++                    s.stage == "vertex" && s.container.as_slice() == code))
++        };
++        assert!(!contains());
++        assert_eq!(stream_result(&bytes, 32), (E_INVALIDARG, std::ptr::null()));
++        assert!(!contains());
++        let (hr, p) = stream_result(&bytes, 24);
++        assert_eq!(hr, S_OK);
++        assert_eq!(shaders(p), [("vertex", code.to_vec())]);
++        assert!(contains());
++        assert_eq!(release(p), 0);
 +    }
 +
 +    #[test]
