@@ -104,3 +104,6 @@ AI 2/3 branches and issues unchanged with no claim comments at session start; ch
 ### B004 second local control and exact native evidence
 - AI4 B004 #27 7210865499 exact #18 reached first cutscene, rapid RAM stop exit143 ~127s, 1774 startup samples 15.59/s p50/95/99 33/154/674ms, two drop intervals, 1161 queued. RAM 3.51→1.25GiB in 3s, swap free 11.63→4.84GiB, last RSS 6.89GiB; late allocation snapshot absent. Concurrent host pressure confounds, no improvement or gameplay result. D17 remains active, no immediate retry until comparable headroom restored, owner may close unused apps; no system/process changes by AI4.
 - #40 2c7b75a2 child #33 20c4ad8a exact count gate 30 CPU trace cases, sanitized matching proof, no runtime changes. Synthetic 45947553575/native 45947553594 active; original #33/#38/#39 active. Register 443cfb2cc2fb154a02198e0d555c82211b691ee1. All 24 IDs open.
+
+### Universal chat recovery prompts
+Four independently copyable replacement prompts are available from [START-HERE.md](START-HERE.md). They recover current issue/PR/CI/decision state and preserve role boundaries; old onboarding tasks are no longer treated as fixed instructions. Documentation-only update; no changes to runtime, flags, approvals or P-ID status.

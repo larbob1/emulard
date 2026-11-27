@@ -2,6 +2,9 @@
 
 Mission: sustained, correctly rendered 30 FPS. Current owner-reported Proton gameplay: 2–3 FPS, not a formal benchmark. Correctness before speed.
 
+## Replacement chats
+Use the [four universal restart prompts](coordination/START-HERE.md) for AI 1–4. They recover current GitHub state rather than relying on a fixed initial task. Only the prompt matching your role applies; the other prompts describe their workstream boundaries. Older coordination entries are historical; follow the latest applicable decisions and owner approval.
+
 ## Start every session
 1. Read all files in [coordination/](https://github.com/larbob1/emulard/tree/coordination/coordination), the [roadmap](https://github.com/larbob1/emulard/blob/main/docs/ROADMAP-30FPS.md), and [deferred register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md). Fetch current refs and check open PRs and CI. Do not trust stale chat history.
 2. Claim one task in your workstream issue before editing: role, P-ID, base SHA, branch, intended files AND prepared upstream symbols, dependencies, tests. If an overlapping claim exists, request coordinator agreement or select another task. Use a separate checkout/worktree and prepared runtime directory.

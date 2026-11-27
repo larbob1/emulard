@@ -1,6 +1,6 @@
 # Claims and handoffs
 
-Use your workstream issue (#11 memory, #12 graphics, #13 reliability) as append-only communication. Read all three issues before touching overlapping symbols. Coordinator summarizes important changes here; don't independently edit this file.
+Use your workstream issue (#11 memory, #12 graphics, #13 reliability, #27 local validation) as append-only communication. Read all four issues before touching overlapping symbols. For chat replacement use [START-HERE.md](START-HERE.md). Record checkpoints after substantive milestones, not only at the end of a session, so a replacement can recover even if a conversation ends unexpectedly. Coordinator summarizes important changes here; don't independently edit this file.
 
 ## Claim template
 - Role / P-ID / concrete task:
