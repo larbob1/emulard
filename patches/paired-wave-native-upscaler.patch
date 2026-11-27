@@ -1,0 +1,78 @@
+--- a/apps/victory/src/run.rs
++++ b/apps/victory/src/run.rs
+@@ -106,6 +106,8 @@
+         println!("not executing (pass --execute to start the title)");
+         return Ok(());
+     }
++    // SAFETY: the mapped title and its threads have not started.
++    unsafe { victory_loader::upscaler::select_native(image.base(), image.info().size_of_image as usize) };
+     victory_loader::report_crashes();
+     victory_loader::log_crashes_to(temp.with_file_name("crashes.log"));
+     victory_hle::runtime::use_console_timers();
+--- a/crates/victory-loader/src/lib.rs
++++ b/crates/victory-loader/src/lib.rs
+@@ -26,6 +26,8 @@
+ mod crash;
+ pub mod prepare;
+ pub mod resolve;
++#[cfg(windows)]
++pub mod upscaler;
+ #[cfg(all(windows, feature = "diagnostics"))]
+ mod stacks;
+ #[cfg(windows)]
+diff --git a/crates/victory-loader/src/upscaler.rs b/crates/victory-loader/src/upscaler.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/victory-loader/src/upscaler.rs
+@@ -0,0 +1,51 @@
++//! Opt-in native upscaler fallback for the supported title build.
++
++use windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache;
++use windows_sys::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
++use windows_sys::Win32::System::Threading::GetCurrentProcess;
++
++// Picker signature and native mode from avatarmanz/VIctory-7900XTX e151e71.
++const PICKER: usize = 0x7e93f0;
++const EXPECTED: &[u8] = &[
++        0x48, 0x83, 0xec, 0x28, 0x80, 0x3d, 0x6d, 0xf0, 0x3a, 0x07, 0x00, 0x75, 0x09, 0x83, 0x3d, 0x68, 0xf0, 0x3a, 0x07, 0x00,
++        0x74, 0x28, 0xe8, 0x35, 0xbd, 0x88, 0xff, 0x8a, 0x0d, 0x5b, 0xf0, 0x3a, 0x07, 0x80, 0xe1, 0x40, 0x80, 0xf9, 0x01, 0xb9,
++        0x07, 0x00, 0x00, 0x00, 0x83, 0xd9, 0x00, 0x84, 0xc0, 0xb8, 0x06, 0x00, 0x00, 0x00, 0x0f, 0x45, 0xc1, 0x48, 0x83, 0xc4,
++        0x28, 0xc3,
++];
++const NATIVE: [u8; 6] = [0xb8, 6, 0, 0, 0, 0xc3];
++
++/// Selects the title's native upscaler when requested and the picker matches.
++///
++/// # Safety
++/// The image of `size` bytes at `base` is mapped and has not started.
++pub unsafe fn select_native(base: usize, size: usize) {
++    if !std::env::var_os("VICTORY_NATIVE_UPSCALER").is_some_and(|v| v == "1") {
++        return;
++    }
++    if PICKER + EXPECTED.len() > size {
++        tracing::warn!("native upscaler picker is outside the mapped image");
++        return;
++    }
++    let at = (base + PICKER) as *mut u8;
++    // SAFETY: the signature is within the mapped image. Only write the
++    // checked prefix, before any title thread can execute it.
++    unsafe {
++        if std::slice::from_raw_parts(at, EXPECTED.len()) != EXPECTED {
++            tracing::warn!("native upscaler picker signature differs");
++            return;
++        }
++        let mut old = 0;
++        if VirtualProtect(at.cast(), NATIVE.len(), PAGE_EXECUTE_READWRITE, &mut old) == 0 {
++            tracing::warn!("could not make native upscaler picker writable");
++            return;
++        }
++        std::ptr::copy_nonoverlapping(NATIVE.as_ptr(), at, NATIVE.len());
++        let restored = VirtualProtect(at.cast(), NATIVE.len(), old, &mut old);
++        let flushed = FlushInstructionCache(GetCurrentProcess(), at.cast(), NATIVE.len());
++        if restored == 0 || flushed == 0 {
++            tracing::warn!("native upscaler picker changed, but protection or cache update failed");
++        } else {
++            tracing::info!("selected the title's native upscaler");
++        }
++    }
++}

@@ -1,0 +1,176 @@
+--- a/crates/victory-gpu/src/framelog.rs
++++ b/crates/victory-gpu/src/framelog.rs
+@@ -63,6 +63,8 @@
+     Remaps,
+     RemapUs,
+     RemapWaitUs,
++    MapViewUs,
++    UnmapViewUs,
+     /// Texture refreshes on every thread, and of them the wait for title
+     /// memory to hold still; uploads recorded.
+     RefreshUs,
+@@ -412,7 +414,7 @@
+          send-and-hash lists {:.1} ms in {:.0}, our compare lists {:.1} ms in {:.0}, all other lists {:.1} ms in {:.0} | \
+          recording, all threads: {:.1} ms in {:.0} calls; all submit calls {:.1} ms | textures: refresh {:.1} ms ({:.1} waiting for memory to hold \
+          still), {:.0} uploads, staging {:.0} made {:.0} reused | remapping: {:.0} calls {:.1} ms ({:.1} waiting for \
+-         readers) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
++         readers, {:.1} mapping, {:.1} unmapping) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
+          faults: {:.0} page, {:.0} guard | process: {:.0} user {:.0} kernel ms | pacing, all threads {:.1} ms | {:.0} \
+          draws | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
+         f.us / 1e3,
+@@ -454,6 +456,8 @@
+         t(T::Remaps),
+         ms(T::RemapUs),
+         ms(T::RemapWaitUs),
++        ms(T::MapViewUs),
++        ms(T::UnmapViewUs),
+         s(S_PIPELINES_MADE),
+         s(S_PIPELINES_LOADED),
+         ms(T::PipelineWaitUs),
+--- a/crates/victory-gpu/src/inplace.rs
++++ b/crates/victory-gpu/src/inplace.rs
+@@ -35,7 +35,7 @@
+ //!   `VirtualProtect` fail with error 87), nor unmap a view in it. Pages
+ //!   outside the opened part are free to change.
+ 
+-use std::collections::BTreeMap;
++use std::collections::{BTreeMap, BTreeSet};
+ use std::ffi::c_void;
+ use std::sync::Mutex;
+ use std::sync::atomic::{AtomicU64, Ordering};
+@@ -271,7 +271,7 @@
+     /// page in every view that shows it. A write through one view of a
+     /// page is a write of the bytes every other view shows
+     /// (`crate::watch` guards them all).
+-    pages: BTreeMap<(usize, u64), Vec<usize>>,
++    pages: BTreeMap<(usize, u64), BTreeSet<usize>>,
+     /// Sections by handle: bytes, and whether made committed.
+     sections: Vec<(usize, u64, bool)>,
+ }
+@@ -308,7 +308,7 @@
+         let mut v = views();
+         v.views.insert(at, (len, section, offset));
+         for k in 0..len.div_ceil(K64) {
+-            v.pages.entry((section, offset + (k * K64) as u64)).or_default().push(at + k * K64);
++            v.pages.entry((section, offset + (k * K64) as u64)).or_default().insert(at + k * K64);
+         }
+     }
+     // This view is writable from now on: a guard over the same bytes at
+@@ -336,7 +336,7 @@
+             let key = (section, offset + (k * K64) as u64);
+             if let Some(pages) = v.pages.get_mut(&key) {
+                 let page = base + k * K64;
+-                pages.retain(|&shown| shown != page);
++                pages.remove(&page);
+                 if pages.is_empty() {
+                     v.pages.remove(&key);
+                 }
+@@ -374,7 +374,9 @@
+     if within >= bytes || !within.is_multiple_of(K64) {
+         return Vec::new();
+     }
+-    v.pages.get(&(section, offset + within as u64)).cloned().unwrap_or_default()
++    v.pages.get(&(section, offset + within as u64))
++        .map(|pages| pages.iter().copied().collect())
++        .unwrap_or_default()
+ }
+ 
+ /// The title views that show any of the physical bytes `[offset, offset +
+@@ -489,10 +491,11 @@
+             return None;
+         }
+         let offset = offset + (at - base) as u64;
+-        let shown = v.pages.get(&(section, offset - offset % K64 as u64))?.clone();
++        let shown = v.pages.get(&(section, offset - offset % K64 as u64))?;
+         if shown.len() > crate::watch::MANY_VIEWS {
+             return None;
+         }
++        let shown: Vec<_> = shown.iter().copied().collect();
+         let section_bytes = v.sections.iter().find(|s| s.0 == section)?.1;
+         (section, offset, shown, section_bytes)
+     };
+--- a/crates/victory-hle/src/modules/dstorage.rs
++++ b/crates/victory-hle/src/modules/dstorage.rs
+@@ -422,7 +422,11 @@
+         })
+         .as_ref()?;
+     STARTED.call_once(|| {
+-        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
++        let available = std::thread::available_parallelism().map_or(4, |n| n.get());
++        let workers = std::env::var("VICTORY_DISK_WORKERS")
++            .ok()
++            .and_then(|value| value.parse::<usize>().ok())
++            .map_or(available, |count| count.clamp(1, available));
+         let started = (0..workers)
+             .filter(|i| {
+                 std::thread::Builder::new()
+--- a/crates/victory-hle/src/modules/xmem.rs
++++ b/crates/victory-hle/src/modules/xmem.rs
+@@ -8,7 +8,7 @@
+ #![allow(clippy::not_unsafe_ptr_arg_deref)]
+ 
+ use std::alloc::{Layout, alloc, dealloc};
+-use std::collections::{BTreeMap, HashMap};
++use std::collections::{BTreeMap, BTreeSet, HashMap};
+ use std::ffi::c_void;
+ use std::sync::atomic::{AtomicUsize, Ordering};
+ use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+@@ -382,7 +382,7 @@
+     /// as upstream's c75fdba keeps it). The title maps pages where the
+     /// card reads them and has them filled afterwards by DirectStorage,
+     /// which writes through views of our own.
+-    shown: HashMap<(usize, usize), Vec<usize>>,
++    shown: HashMap<(usize, usize), BTreeSet<usize>>,
+ }
+ 
+ static PHYSICAL: LazyLock<Mutex<Physical>> = LazyLock::new(|| {
+@@ -832,6 +832,7 @@
+     // SAFETY: splits the placeholder around the range (failing harmlessly
+     // when the range is the whole placeholder), then maps the section
+     // there; both act only on placeholders.
++    let started = std::time::Instant::now();
+     let view = unsafe {
+         // An exact view unmapped with MEM_PRESERVE_PLACEHOLDER already
+         // yielded a placeholder of the requested size.
+@@ -854,6 +855,7 @@
+             0,
+         )
+     };
++    victory_gpu::framelog::add(victory_gpu::framelog::T::MapViewUs, started.elapsed().as_micros() as u64);
+     if view.Value as usize != base {
+         tracing::warn!(
+             address = format_args!("{base:#x}"),
+@@ -873,7 +875,7 @@
+     // What the range shows now, for the GPU side's in-place census.
+     victory_gpu::title_memory_view(base, len, slice.section.0 as usize, (slice.index * PAGE) as u64);
+     for k in 0..len.div_ceil(PAGE) {
+-        physical.shown.entry(slice.key(k)).or_default().push(base + k * PAGE);
++        physical.shown.entry(slice.key(k)).or_default().insert(base + k * PAGE);
+     }
+     physical.views.insert(base, (len, slice));
+     true
+@@ -958,7 +960,7 @@
+         for k in 0..size.div_ceil(PAGE) {
+             let key = slice.key(k);
+             if let Some(addresses) = physical.shown.get_mut(&key) {
+-                addresses.retain(|&a| a != at + k * PAGE);
++                addresses.remove(&(at + k * PAGE));
+                 if addresses.is_empty() {
+                     physical.shown.remove(&key);
+                 }
+@@ -966,6 +968,7 @@
+         }
+         victory_gpu::title_memory_remapped(at, size);
+         // SAFETY: a view we mapped; it becomes a placeholder again.
++        let started = std::time::Instant::now();
+         let unmapped = unsafe {
+             UnmapViewOfFile2(
+                 GetCurrentProcess(),
+@@ -975,6 +978,7 @@
+                 MEM_PRESERVE_PLACEHOLDER,
+             )
+         } != 0;
++        victory_gpu::framelog::add(victory_gpu::framelog::T::UnmapViewUs, started.elapsed().as_micros() as u64);
+         exact_placeholder |= unmapped && at == base && size == len;
+         if at < base {
+             map(physical, at, base - at, slice.clone());

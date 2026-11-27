@@ -1,0 +1,46 @@
+diff --git a/crates/victory-shader/src/emit/mod.rs b/crates/victory-shader/src/emit/mod.rs
+index 5217df8..079bdec 100644
+--- a/crates/victory-shader/src/emit/mod.rs
++++ b/crates/victory-shader/src/emit/mod.rs
+@@ -340,6 +340,31 @@ fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
+     emit(&c, &native, &p, &st, &io, &res)
+ }
+ 
++/// Enables the existing wave-wide retry for selected DXBC container
++/// digests, without widening unrelated shaders in the same run.
++fn wave_wide_for_container(digest: &[u8; 16]) -> bool {
++    static DIGESTS: std::sync::OnceLock<Vec<[u8; 16]>> = std::sync::OnceLock::new();
++    DIGESTS
++        .get_or_init(|| {
++            std::env::var("VICTORY_WAVE_WIDE_DIGESTS")
++                .unwrap_or_default()
++                .split(',')
++                .filter_map(|entry| {
++                    let hex = entry.trim().as_bytes();
++                    if hex.len() != 32 {
++                        return None;
++                    }
++                    let mut digest = [0; 16];
++                    for (byte, pair) in digest.iter_mut().zip(hex.chunks_exact(2)) {
++                        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
++                    }
++                    Some(digest)
++                })
++                .collect()
++        })
++        .contains(digest)
++}
++
+ /// Emits a program whose earlier stages already ran.
+ pub fn emit(
+     c: &Container,
+@@ -422,7 +447,8 @@ pub fn emit(
+         // lost the card in a submission of two programs that had just moved to it
+         // (`ptfx_CS_lightAtlas_Sprite` and `_Trail`). The 32-lane programs' form below, which
+         // has no barrier, stays on.
+-        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1");
++        let wide_on = std::env::var_os("VICTORY_WAVE_WIDE").is_some_and(|v| v == "1")
++            || wave_wide_for_container(&c.digest);
+         // exact first: each host wave on its own where that is exact (the idiom, every
+         // form; no barriers), then the other exact forms; then approximate
+         for exact in [true, false] {

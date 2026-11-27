@@ -1,0 +1,9 @@
+# Completion-scoped fault feedback
+
+The optional lighting build now binds a separate 256 KiB fault bitmap per host command list when asynchronous submission is disabled. The bitmap lives in the list's deferred state until reset. The synchronous submission path verifies the actual fence value, rejects the device-removed sentinel, then drains and clears completed feedback before ordinary writeback. Reported pages are accumulated for the next mapping pass. A repeated list in one submission is drained only once in effect, because its marks are cleared.
+
+This is a production-path experiment for missing-page discovery, not dirty-page filtering. It does not change GPU writeback or reconstruct lost stores. It uses the existing global bitmap path unchanged for asynchronous submission, where the old clear race remains. Per-list allocation and scanning may increase memory and CPU cost. The global bitmap remains allocated as a fallback. No claim is made that an invalid GPU result is automatically rejected.
+
+Marvisak/VIctory's per-list page bitmap and completion callbacks motivated this isolation step. The independent address-map architecture was also reviewed. The current baseline still uses a shared append-only directory and has no exact per-submission dirty-write instrumentation. To filter actual writes safely, all write forms and alias ownership must be accounted for, then the relay and card writeback contracts must be integrated.
+
+The previous synthetic failure was confirmed in the logs: the test fixture lacked the newly required joined-copy anchor. The fixture now contains the exact anchor without changing the pinned source line positions, and tests both refresh invalidations. An additional Rust test checks fence readiness; existing bitmap decoding and patcher tests cover the expanded source edits. Full runtime compilation and GPU execution remain unverified for this revision.

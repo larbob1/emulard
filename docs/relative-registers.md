@@ -1,0 +1,7 @@
+# Block-local relative register bounds
+
+Marvisak/VIctory's range analysis motivates bounding relative register moves before building SSA. This candidate independently implements a smaller subset: immediate scalar moves and unsigned AND/min with a known immediate, confined to a basic block. Bounds are discarded at leaders, unknown writes to M0, and possible control-transfer or register-mode effects. Unknown indices retain the existing whole-range behavior. The existing unspill heuristic for unknown relative reads remains; proven ranges are treated as actual reads.
+
+The proven maximum limits source and destination effects before SSA construction and is also used while identifying parked scalar registers. This can reduce unnecessary SSA values and shader IR for indexed register arrays. It is not the reference implementation's inter-block or loop induction analysis, and the actual reduction in failed shaders is unknown. The current lowering still emits a selection chain; this change does not promise a particular GPU speedup.
+
+The synthetic Rust regression checks constant, masked, unknown and invalidated indices. Three Python tests cover the transformation and source rejection. The candidate is enabled in both builds. The last verified full build before this change is b2f6740; newer build results must be checked independently. No proprietary inputs or GPU execution claims are included.

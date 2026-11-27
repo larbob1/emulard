@@ -1,0 +1,7 @@
+# Ray memory feedback and wave cache compatibility
+
+The latest completed runtime workflow before this change passed the baseline and failed the page-safe candidate with E0061. The raw memory helper had gained a write-tracking argument, but the ray-intersection module still called its old signature. This revision updates the intersection read path to pass false. The source anchor is checked against the pinned blob, and the feedback patcher now includes the separate intersection module.
+
+The executable fingerprint already separates builds with different feedback layouts. A separate defect is that cache lookups did not distinguish the host's maximum wave size. The same executable can emit different code for a 32-lane host, a 64-lane host or unknown capability. A new per-lookup key combines the executable/settings fingerprint with the current host capability. This avoids freezing an unknown capability in a static initialization and prevents reuse across different wave limits. It assumes the device's capability is stable while a shader translates. A Rust regression checks all three capabilities and different build fingerprints.
+
+The new candidate still requires a successful build, shader validation and hardware testing. It does not change the ray-box or ray-triangle intersection mathematics or enable incomplete builder pipelines. Dirty targets remain telemetry rather than a writeback filter. No FPS improvement is claimed.

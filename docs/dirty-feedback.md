@@ -1,0 +1,9 @@
+# Completion-scoped raw write feedback
+
+The optional lighting candidate now uses one allocation containing two 256 KiB bitmaps for each command list that accesses raw GPU memory. One reports missing pages; the other records mapped pages targeted by raw stores and atomics. Aligned vector stores report every dword's page. Read accesses do not mark dirty pages. Dirty means a write was attempted, not necessarily that its bytes changed.
+
+The synchronous path checks the host fence before consuming feedback. Asynchronous submissions retain a deduplicated collection of feedback resources in their flight record, including internally owned command lists. Both the relay landing and normal late settlement paths consume completed feedback. A device-removed or incomplete fence is never accepted for feedback consumption. The old global fault buffer and its racing clear are removed from this candidate. Resources are held by the command list and by the flight until completion.
+
+Dirty targets are counted for diagnostics only. Uninstrumented writes through descriptors, root views, and other GPU paths are not covered; there is no safe basis to drop snapshot ranges or skip comparisons yet. The original writeback path remains authoritative. Per-list feedback increases allocation and shader atomic overhead and has not been benchmarked. It also cannot repair stores that already reached a null mapping. The experimental build remains separate from the baseline.
+
+This adapts the per-list ownership and completion concept from the reviewed Marvisak implementation; it is not a direct port of its different sparse directory and writeback machinery. The existing acceleration-structure builder gate is unchanged. The fence readiness test is now explicitly invoked in both the local build helper and CI. Shader and GPU validation are still necessary. No new translated program count or lighting result is claimed.

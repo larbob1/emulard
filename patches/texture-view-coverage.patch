@@ -1,0 +1,102 @@
+# Uses the existing view table to cover complete texture spans, inspired by
+# avatarmanz/VIctory-7900XTX c27a8ec and 49d7126.
+
+--- a/crates/victory-gpu/src/texture.rs
++++ b/crates/victory-gpu/src/texture.rs
+@@ -1107,7 +1107,7 @@
+         };
+         #[cfg(feature = "diagnostics")]
+         check_backing_view(self.memory, size, &_mapped);
+-        if !committed(self.memory, size) {
++        if !mapped_by_views(start, size, &_mapped) && !committed(self.memory, size) {
+             // Partly mapped: a streamed texture with only some mips' pages
+             // there, the usual state while it streams in. Read through the
+             // copy, which stands unmapped pages (zeros), and upload what
+@@ -1421,6 +1421,26 @@
+     true
+ }
+ 
++fn check_views() -> bool {
++    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ENABLED.get_or_init(|| std::env::var_os("VICTORY_MAPPED_BY_VIEWS").is_some_and(|v| v == "1"))
++}
++
++/// A fully covered span can use the view table instead of probing its
++/// host pages. Gaps and other allocations use the host query. The
++/// mapping read guard keeps the view stable for this check.
++fn mapped_by_views(at: usize, len: usize, _mapped: &crate::watch::Reading) -> bool {
++    if !check_views() || at.checked_add(len.max(1)).is_none()
++    {
++        return false;
++    }
++    if matches!(crate::inplace::cover(at, len), crate::inplace::Cover::Run(..) | crate::inplace::Cover::Scattered) {
++        crate::framelog::add(crate::framelog::T::TextureViewChecks, 1);
++        return true;
++    }
++    false
++}
++
+ /// How many bytes of `[at, at + len)` are committed memory: all of a
+ /// texture that is there, some of one streaming in (its smaller mips lie
+ /// at the start of its memory, and their pages are mapped first), none of
+@@ -1434,6 +1454,12 @@
+     }
+     let start = at as usize;
+     let end = start.saturating_add(len);
++    if check_views()
++        && let Some(mapped) = crate::watch::title_memory_reading_now()
++        && mapped_by_views(start, len, &mapped)
++    {
++        return len as u64;
++    }
+     if !committed(at, 1) && !committed((end - 1) as *const u8, 1) {
+         return 0;
+     }
+--- a/crates/victory-gpu/src/framelog.rs
++++ b/crates/victory-gpu/src/framelog.rs
+@@ -62,6 +62,7 @@
+     /// readers.
+     Remaps,
+     RemapUs,
++    TextureViewChecks,
+     TargetBinds,
+     TargetBindsSkipped,
+     RemapWaitUs,
+@@ -418,7 +419,7 @@
+          still), {:.0} uploads, staging {:.0} made {:.0} reused | remapping: {:.0} calls {:.1} ms ({:.1} waiting for \
+          readers, {:.1} mapping, {:.1} unmapping) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
+          faults: {:.0} page, {:.0} guard | process: {:.0} user {:.0} kernel ms | pacing, all threads {:.1} ms | {:.0} \
+-         draws | target binds: {:.0} sent, {:.0} reused | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
++         draws | target binds: {:.0} sent, {:.0} reused | texture view checks: {:.0} | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
+         f.us / 1e3,
+         (s(S_THREAD_USER) + s(S_THREAD_KERNEL)) / 1e3,
+         s(S_THREAD_USER) / 1e3,
+@@ -474,6 +475,7 @@
+         s(S_DRAWS),
+         t(T::TargetBinds),
+         t(T::TargetBindsSkipped),
++        t(T::TextureViewChecks),
+         s(S_FREE_MB),
+         t(T::RenderSlow),
+         t(T::RenderLooks),
+--- a/crates/victory-hle/src/modules/xmem.rs
++++ b/crates/victory-hle/src/modules/xmem.rs
+@@ -728,7 +728,7 @@
+     // until it is committed. A read of title memory in place must not fall
+     // into that gap (`victory_gpu::title_memory_remapping`).
+     let _changing = victory_gpu::title_memory_remapping();
+-    unmap(&mut physical, base, n * PAGE);
++    let exact_placeholder = unmap(&mut physical, base, n * PAGE);
+     if pages.is_null() {
+         return address;
+     }
+@@ -750,7 +750,8 @@
+                 })
+             })
+             .count();
+-        if !map(&mut physical, base + i * PAGE, run * PAGE, first) {
++        let split = !(exact_placeholder && run == n);
++        if !map_view(&mut physical, base + i * PAGE, run * PAGE, first, split) {
+             return std::ptr::null_mut();
+         }
+         i += run;

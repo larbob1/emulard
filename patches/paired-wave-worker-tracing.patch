@@ -1,0 +1,126 @@
+--- a/crates/victory-gpu/src/pipeline.rs
++++ b/crates/victory-gpu/src/pipeline.rs
+@@ -141,17 +141,26 @@
+     pub(crate) fn translated(&self) -> Option<&Translated> {
+         self.translated
+             .get_or_init(|| {
+-                let done = translate(&self.container);
+-                // `VICTORY_SHADER_SAVE=<dir>`: each shader as the title gave it (`.cdxil`) and as
+-                // translated (`.dxil`), by the hash crash reports name it with
+-                if let Some(dir) = std::env::var_os("VICTORY_SHADER_SAVE") {
++                // Save the input before entering the translator so a fatal
++                // compiler error leaves a container that can be replayed.
++                let capture = std::env::var_os("VICTORY_SHADER_SAVE").map(|dir| {
+                     let dir = std::path::PathBuf::from(dir);
+                     let _ = std::fs::create_dir_all(&dir);
+                     let stem = format!("{}.{}", self.hash, self.stage);
+                     let _ = std::fs::write(dir.join(format!("{stem}.cdxil")), &self.container);
+-                    if let Ok(t) = &done {
+-                        let _ = std::fs::write(dir.join(format!("{stem}.dxil")), &t.host.dxil);
+-                    }
++                    (dir, stem)
++                });
++                let thread = crate::host::thread_id();
++                let started = std::time::Instant::now();
++                tracing::debug!(thread, stage = self.stage, hash = %self.hash, "translating shader");
++                let done = translate(&self.container);
++                tracing::debug!(
++                    thread, stage = self.stage, hash = %self.hash,
++                    elapsed_us = started.elapsed().as_micros() as u64,
++                    translated = done.is_ok(), "shader translation finished"
++                );
++                if let (Some((dir, stem)), Ok(t)) = (capture, &done) {
++                    let _ = std::fs::write(dir.join(format!("{stem}.dxil")), &t.host.dxil);
+                 }
+                 if let Ok(t) = &done {
+                     KEPT[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+--- a/crates/victory-gpu/src/pipeline/make.rs
++++ b/crates/victory-gpu/src/pipeline/make.rs
+@@ -61,7 +61,13 @@
+ 
+     fn make(&self) {
+         self.made
+-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
++            .get_or_init(|| {
++                let thread = crate::host::thread_id();
++                tracing::debug!(thread, key = %self.key, shaders = ?self.shaders, "pipeline job started");
++                let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
++                tracing::debug!(thread, key = %self.key, created = made.is_some(), "pipeline job finished");
++                made
++            });
+         let (lock, done) = &DONE;
+         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
+         done.notify_all();
+--- a/crates/victory-gpu/src/pipeline/library.rs
++++ b/crates/victory-gpu/src/pipeline/library.rs
+@@ -258,16 +258,21 @@
+ }
+ 
+ /// A library call of this thread, listed in [`CALLS`] until dropped.
+-struct Call(u32, u64);
++struct Call {
++    thread: u32,
++    since: u64,
++    phase: &'static str,
++}
+ 
+ fn call(what: &'static str, name: &str) -> Call {
+     let (thread, since) = (crate::host::thread_id(), crate::host::now_us());
+     let label = LABEL.with(|l| l.borrow().clone());
++    tracing::debug!(thread, phase = what, pipeline = name, shaders = %label, "pipeline phase started");
+     CALLS
+         .lock()
+         .unwrap_or_else(|e| e.into_inner())
+         .push((thread, what, format!("{name} {label}"), since));
+-    Call(thread, since)
++    Call { thread, since, phase: what }
+ }
+ 
+ impl Drop for Call {
+@@ -275,7 +280,13 @@
+         CALLS
+             .lock()
+             .unwrap_or_else(|e| e.into_inner())
+-            .retain(|c| (c.0, c.3) != (self.0, self.1));
++            .retain(|c| (c.0, c.1, c.3) != (self.thread, self.phase, self.since));
++        tracing::debug!(
++            thread = self.thread,
++            phase = self.phase,
++            elapsed_us = crate::host::now_us().saturating_sub(self.since),
++            "pipeline phase finished"
++        );
+     }
+ }
+ 
+@@ -540,15 +551,20 @@
+     create: impl FnOnce() -> windows::core::Result<ID3D12PipelineState>,
+ ) -> windows::core::Result<ID3D12PipelineState> {
+     let wide = HSTRING::from(name);
+-    let Some(library) = library() else {
++    let library = {
++        let _call = call("open library", name);
++        library()
++    };
++    let Some(library) = library else {
+         MADE.fetch_add(1, Ordering::Relaxed);
++        let _call = call("driver compile", name);
+         return create();
+     };
+     let began = std::time::Instant::now();
+     let loaded = {
++        let _call = call("load from cache (including lock wait)", name);
+         let _all = one_call();
+         let _one = same_name(name);
+-        let _call = call("load", name);
+         load(&library.library, PCWSTR(wide.as_ptr()))
+     };
+     // The load read the library's file (see `trim`).
+@@ -567,7 +583,7 @@
+     };
+     // Compiled outside any lock: compiles take up to seconds.
+     let pso = {
+-        let _call = call("make", name);
++        let _call = call("driver compile", name);
+         create()?
+     };
+     MADE.fetch_add(1, Ordering::Relaxed);

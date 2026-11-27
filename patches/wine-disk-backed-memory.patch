@@ -1,0 +1,105 @@
+diff --git a/crates/victory-hle/src/modules/xmem.rs b/crates/victory-hle/src/modules/xmem.rs
+index e898459..153058b 100644
+--- a/crates/victory-hle/src/modules/xmem.rs
++++ b/crates/victory-hle/src/modules/xmem.rs
+@@ -397,6 +397,46 @@ fn physical() -> MutexGuard<'static, Physical> {
+     PHYSICAL.lock().unwrap_or_else(|e| e.into_inner())
+ }
+ 
++/// Back this section with a sparse file so the host can reclaim its pages
++/// through ordinary filesystem writeback instead of keeping them in swap.
++fn disk_backed_section(directory: &std::path::Path, size: usize) -> std::io::Result<HANDLE> {
++    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
++    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_DELETE_ON_CLOSE;
++
++    static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
++    let file = loop {
++        let index = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
++        let path = directory.join(format!("victory-xmem-{}-{index}.bin", std::process::id()));
++        match std::fs::OpenOptions::new()
++            .read(true)
++            .write(true)
++            .create_new(true)
++            .custom_flags(FILE_FLAG_DELETE_ON_CLOSE)
++            .open(path)
++        {
++            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
++            result => break result?,
++        }
++    };
++    file.set_len(size as u64)?;
++    // SAFETY: the file handle is valid for the call. The section retains
++    // its own reference to the file after the handle closes.
++    let section = unsafe {
++        CreateFileMappingW(
++            file.as_raw_handle(),
++            std::ptr::null(),
++            PAGE_READWRITE,
++            0,
++            0,
++            std::ptr::null(),
++        )
++    };
++    if section.is_null() {
++        return Err(std::io::Error::last_os_error());
++    }
++    Ok(section)
++}
++
+ /// `count` is in and out (pages wanted, pages given); all or nothing here.
+ pub extern "system" fn XMemAllocatePhysicalPages(
+     flags: u64,
+@@ -411,23 +451,36 @@ pub extern "system" fn XMemAllocatePhysicalPages(
+     let Some(size) = n.checked_mul(PAGE).filter(|&s| s > 0) else {
+         return 0;
+     };
+-    // A pagefile-backed section of `size` bytes, its pages committed when
+-    // first mapped or written (`commit`): the title asks for 6.1
+-    // GiB at once, which a busy host often cannot commit (error 1450).
+-    // SAFETY: plain section creation.
+-    let handle = unsafe {
+-        CreateFileMappingW(
+-            INVALID_HANDLE_VALUE,
+-            std::ptr::null(),
+-            // Under Wine a committed section is a sparse file, free until
+-            // touched, and committing a reserved one page by page costs a
+-            // wineserver request each that scans every range committed so
+-            // far: commit it whole there.
+-            PAGE_READWRITE | if on_wine() { SEC_COMMIT } else { SEC_RESERVE },
+-            (size as u64 >> 32) as u32,
+-            size as u32,
+-            std::ptr::null(),
+-        )
++    let backing_dir = on_wine().then(|| std::env::var_os("VICTORY_XMEM_BACKING_DIR")).flatten();
++    let handle = if let Some(directory) = backing_dir {
++        match disk_backed_section(std::path::Path::new(&directory), size) {
++            Ok(section) => section,
++            Err(error) => {
++                tracing::error!(size, %error, "cannot create disk-backed console memory");
++                // SAFETY: checked non-null above.
++                unsafe { count.write(0) };
++                return 0;
++            }
++        }
++    } else {
++        // A pagefile-backed section of `size` bytes, its pages committed when
++        // first mapped or written (`commit`): the title asks for 6.1
++        // GiB at once, which a busy host often cannot commit (error 1450).
++        // SAFETY: plain section creation.
++        unsafe {
++            CreateFileMappingW(
++                INVALID_HANDLE_VALUE,
++                std::ptr::null(),
++                // Under Wine a committed section is a sparse file, free until
++                // touched, and committing a reserved one page by page costs a
++                // wineserver request each that scans every range committed so
++                // far: commit it whole there.
++                PAGE_READWRITE | if on_wine() { SEC_COMMIT } else { SEC_RESERVE },
++                (size as u64 >> 32) as u32,
++                size as u32,
++                std::ptr::null(),
++            )
++        }
+     };
+     if handle.is_null() {
+         let error = std::io::Error::last_os_error();

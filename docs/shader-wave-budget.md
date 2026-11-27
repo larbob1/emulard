@@ -1,0 +1,9 @@
+# Shader arithmetic, wave mask and snapshot candidates
+
+The packed integer candidate now supports non-saturating signed and unsigned 16-bit dot products as well as the prior 8-bit forms. The raw global memory path also lowers 32-bit compare-and-swap with the data pair ordered replacement then comparison. The reviewed independent AtomicEmitter.cs implementation and existing buffer atomic lowering agree on that ordering. The raw operation retains the existing guarded return behavior. Wide atomic operations, saturating dot products and signed multiply-add carry behavior are still pending.
+
+The local-wave allocation classifier formerly accepted a mask whenever a known first-lane comparison occurred anywhere in its boolean support. That was insufficient: a negated comparison or an OR with another condition can admit other lanes. The new bounded read-only BDD check requires a positive first-lane condition to be necessary. It refuses unproven cases; this protects correctness and can reduce approximate fallback coverage. It is not a general exact wave64 implementation.
+
+The retained CPU snapshot pool now uses checked arithmetic and atomic admission rather than temporarily incrementing beyond the budget and rolling back. The configured cap and default policy remain unchanged. This avoids counter overflow and concurrent budget overshoot; it does not reduce active snapshots or prove that a lower budget improves frame time.
+
+All source anchors were verified against both reviewed patch compositions. Four new Rust regression functions are invoked in CI. Existing Python anchor tests were updated for multi-edit sources. The actual shader executions and builder validation remain pending. The per-list dirty feedback still lacks complete write coverage, so no production writeback filter is enabled. No complete lighting or performance result is claimed.

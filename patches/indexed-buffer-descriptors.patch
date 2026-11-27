@@ -1,0 +1,310 @@
+Adapted from uiliannn/VItoriaBr commits b62bbc0 and 77ad907 (GPL-3.0-or-later).
+Match four-dword host records with a sixteen-byte shader address stride.
+diff --git a/crates/victory-gpu/src/descriptor/host.rs b/crates/victory-gpu/src/descriptor/host.rs
+index ab40886..d4f0734 100644
+--- a/crates/victory-gpu/src/descriptor/host.rs
++++ b/crates/victory-gpu/src/descriptor/host.rs
+@@ -56,6 +56,11 @@ pub(crate) struct HostHeap {
+     /// (`victory_shader::emit::SLOT_STRIDES`): an upload buffer of
+     /// `SLOT_STRIDES_COUNT` dwords, its GPU address and its mapping.
+     strides: Option<(ID3D12Resource, u64, usize)>,
++    /// View heaps: the title address of the buffer view at each title slot,
++    /// four dwords per slot, for shaders that read a descriptor's address out
++    /// of a table at an index they compute
++    /// (`victory_shader::emit::SLOT_VIEWS`).
++    views: Option<(ID3D12Resource, u64, usize)>,
+     /// Title slots holding buffer views. Such a view gets its host slot
+     /// (and its memory a host copy) only when something reads it: a draw
+     /// through a table, or [`HostHeap::buffer_slots`] for shaders that pick
+@@ -621,6 +626,19 @@ impl HostHeap {
+                 Some((buffer, gpu, data as usize))
+             })
+             .flatten();
++        let views = (!sampler)
++            .then(|| {
++                let bytes = u64::from(victory_shader::emit::SLOT_VIEWS_COUNT) * 16;
++                let (buffer, data) = host.upload_buffer(bytes)?;
++                // SAFETY: the buffer's whole mapping; a live buffer.
++                let gpu = unsafe {
++                    std::ptr::write_bytes(data, 0, bytes as usize);
++                    buffer.GetGPUVirtualAddress()
++                };
++                crate::host::name(&buffer, || "view addresses by view heap slot".to_owned());
++                Some((buffer, gpu, data as usize))
++            })
++            .flatten();
+         let h = HostHeap {
+             heap,
+             raw_memory: Mutex::default(),
+@@ -635,6 +653,7 @@ impl HostHeap {
+             free: std::sync::atomic::AtomicU32::new(DYNAMIC),
+             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
+             strides,
++            views,
+             buffers: Mutex::default(),
+             changed: Mutex::default(),
+             textures: Mutex::default(),
+@@ -817,6 +836,16 @@ impl HostHeap {
+         self.strides.as_ref().map(|s| &s.0)
+     }
+ 
++    /// The GPU address of the table of view addresses by title slot.
++    pub(crate) fn views_gpu(&self) -> Option<u64> {
++        self.views.as_ref().map(|s| s.1)
++    }
++
++    /// The view-address table's buffer, for a list to hold.
++    pub(crate) fn views_buffer(&self) -> Option<&ID3D12Resource> {
++        self.views.as_ref().map(|s| &s.0)
++    }
++
+     /// Up to `max` title slots whose texture view is due at `frame`, each
+     /// with its write number, in the order to serve them
+     /// ([`TextureQueue::due`]), and the queue's counts
+@@ -1075,6 +1104,21 @@ impl HostHeap {
+             // dword, either value is one the slot had).
+             unsafe { (*data as *mut u32).add(index as usize).write_volatile(stride.unwrap_or(0)) };
+         }
++        let range = view.and_then(buffer_range);
++        if let Some((_, _, data)) = &self.views
++            && index < victory_shader::emit::SLOT_VIEWS_COUNT
++        {
++            // SAFETY: inside the mapping; four dwords per slot:
++            // the address, the byte length and the element stride.
++            unsafe {
++                let at = (*data as *mut u32).add(index as usize * 4);
++                let (address, len) = range.unwrap_or((0, 0));
++                at.write_volatile(address as u32);
++                at.add(1).write_volatile((address >> 32) as u32);
++                at.add(2).write_volatile(len as u32);
++                at.add(3).write_volatile(stride.unwrap_or(0));
++            };
++        }
+         let mut buffers = self.buffers.lock().unwrap_or_else(|e| e.into_inner());
+         let was = if stride.is_some() {
+             buffers.insert(index);
+diff --git a/crates/victory-gpu/src/draw.rs b/crates/victory-gpu/src/draw.rs
+index d7cc7c8..4052c4c 100644
+--- a/crates/victory-gpu/src/draw.rs
++++ b/crates/victory-gpu/src/draw.rs
+@@ -981,6 +981,23 @@ impl State {
+                         }
+                         continue;
+                     }
++                    if srv && slot == victory_shader::emit::SLOT_VIEWS {
++                        // Ours: the title addresses of the heap's buffer
++                        // views, for a descriptor read as data.
++                        match self.heap_views(list) {
++                            // SAFETY: an open list; the table lives as long
++                            // as the heap the list holds.
++                            Some(gpu) => unsafe {
++                                if compute {
++                                    l.SetComputeRootShaderResourceView(param, gpu);
++                                } else {
++                                    l.SetGraphicsRootShaderResourceView(param, gpu);
++                                }
++                            },
++                            None => once!("a shader reads view addresses of a heap that is not set"),
++                        }
++                        continue;
++                    }
+                     let tabled = srv && crate::pipeline::host::bounded_root_srvs();
+                     let Some(&Root::View(address)) = self.roots_ref(compute).get(usize::from(slot))
+                     else {
+@@ -1423,6 +1440,26 @@ impl State {
+         Some(gpu)
+     }
+ 
++    /// [`State::heap_buffers`] for a shader that reads a descriptor's
++    /// address as data: the GPU address of the host's table of the buffer
++    /// views' title addresses by heap slot. The pass that readies the
++    /// buffer views also fills the table.
++    fn heap_views(&self, list: &HostList) -> Option<u64> {
++        let heap = self
++            .heaps
++            .iter()
++            .filter(|&&h| h != 0)
++            .map(|&h| crate::descriptor::heap(h as This))
++            .find(|h| !h.samplers())?;
++        let host = heap.host()?;
++        let gpu = host.views_gpu()?;
++        self.heap_buffers(list)?;
++        if let Some(buffer) = host.views_buffer() {
++            list.keep(buffer);
++        }
++        Some(gpu)
++    }
++
+     /// The texture side of [`State::heap_buffers`]: textures the title fills
+     /// itself (streamed pages, layout-library copies) whose views sit in the
+     /// view heap are created (placed textures have no host texture until
+diff --git a/crates/victory-gpu/src/pipeline/host.rs b/crates/victory-gpu/src/pipeline/host.rs
+index e8d4579..0d2c6dc 100644
+--- a/crates/victory-gpu/src/pipeline/host.rs
++++ b/crates/victory-gpu/src/pipeline/host.rs
+@@ -421,6 +421,7 @@ impl HostPipeline {
+                         slot == victory_shader::emit::SLOT_FAULTS
+                     } else {
+                         slot == victory_shader::emit::SLOT_STRIDES
++                            || slot == victory_shader::emit::SLOT_VIEWS
+                             || slot == victory_shader::emit::SLOT_MEMORY
+                     };
+                     if (uav || kind == D3D12_ROOT_PARAMETER_TYPE_SRV) && !ours && bounded_root_srvs() {
+diff --git a/crates/victory-shader/src/emit/lower.rs b/crates/victory-shader/src/emit/lower.rs
+index 24f91cd..3df62fd 100644
+--- a/crates/victory-shader/src/emit/lower.rs
++++ b/crates/victory-shader/src/emit/lower.rs
+@@ -2972,6 +2972,61 @@ impl<'a> Lower<'a> {
+         Some((lo, hi))
+     }
+ 
++    /// [`view_address`] for a table entry chosen at run time (a computed
++    /// index into a descriptor table or the resource heap): the host's table
++    /// of the buffer views' title addresses by heap slot
++    /// ([`shader::SLOT_VIEWS`]).
++    fn view_address_indexed(&mut self, site: Site, first: u8) -> Result<Option<(V, V, V, V)>, Why> {
++        let a = *self
++            .scalar
++            .get(&site)
++            .ok_or("an untracked descriptor load")?;
++        let root = self
++            .x
++            .native
++            .layout
++            .get(a.param)
++            .map(|p| p.root)
++            .ok_or("a descriptor outside the tables")?;
++        if !matches!(root, RootType::Table | RootType::ResourceHeap) || a.dynamic.is_none() {
++            return Ok(None);
++        }
++        let c = self.cur;
++        let slot = self.heap_index(site, first, false)?;
++        let last = self.s.m.i32(super::shader::SLOT_VIEWS_COUNT - 1);
++        let i32t = self.s.t.i32;
++        let slot = self.s.op(c, "binary.i32", Attr::ReadNone, i32t, 40, &[slot, last]);
++        self.s.m.tag(slot, Tag::Clamp);
++        // Each heap slot stores four 32-bit words.
++        let four = self.s.m.i32(4);
++        let byte = self.s.m.bin(c, Bin::Shl, slot, four);
++        let h = self.s.root_srv_handle(super::shader::SLOT_VIEWS);
++        let iu = self.s.m.undef(self.s.t.i32);
++        let mask = self.s.m.i8(0xF);
++        let align = self.s.m.i32(4);
++        let r = self.s.op(
++            c,
++            "rawBufferLoad.f32",
++            Attr::ReadOnly,
++            self.s.t.res_ret,
++            139,
++            &[h, byte, iu, mask, align],
++        );
++        let lo = self.s.m.extract(c, r, 0);
++        let hi = self.s.m.extract(c, r, 1);
++        let len = self.s.m.extract(c, r, 2);
++        let stride = self.s.m.extract(c, r, 3);
++        let (lo, hi, len, stride) = (
++            self.as_int(lo),
++            self.as_int(hi),
++            self.as_int(len),
++            self.as_int(stride),
++        );
++        let off = a.offset as i32;
++        let (lo, hi) = self.address_plus(lo, hi, off);
++        Ok(Some((lo, hi, len, stride)))
++    }
++
+     /// `lo`, `hi` plus the instruction's byte offset `off`, with the carry.
+     fn address_plus(&mut self, lo: V, hi: V, off: i32) -> (V, V) {
+         if off == 0 {
+@@ -6711,7 +6766,9 @@ impl<'a> Lower<'a> {
+             }
+             // A buffer view the code only takes the address of, to walk
+             // the memory behind it (a ray-tracing structure): the address
+-            // from the host, the other dwords have no value.
++            // from the host, the other dwords have no value. A table entry
++            // chosen at run time asks the host's table of view addresses;
++            // one load may carry two descriptors (8 dwords).
+             if count <= 4
+                 && let Some((lo, hi)) = self.view_address(site)
+             {
+@@ -6730,6 +6787,31 @@ impl<'a> Lower<'a> {
+                 }
+                 return Ok(());
+             }
++            if count <= 8 && count % 4 == 0 {
++                let mut wrote = false;
++                for group in 0..count / 4 {
++                    let first = (4 * group) as u8;
++                    let Some((lo, hi, len, stride)) =
++                        self.view_address_indexed(site, first).ok().flatten()
++                    else {
++                        continue;
++                    };
++                    wrote = true;
++                    for k in 4 * group..4 * group + 4 {
++                        let reg = Reg::S(code + k as u8);
++                        let v = match k % 4 {
++                            0 => lo,
++                            1 => hi,
++                            2 => len,
++                            _ => stride,
++                        };
++                        self.write(inst, reg, v, None);
++                    }
++                }
++                if wrote {
++                    return Ok(());
++                }
++            }
+             return Err("a descriptor read only as data");
+         };
+         let src = Source::Loaded { load: site, first };
+@@ -6851,7 +6933,12 @@ impl<'a> Lower<'a> {
+                 });
+                 if first == 0
+                     && computed
+-                    && let Some((lo, hi)) = self.view_address(site)
++                    && let Some((lo, hi)) = self.view_address(site).or_else(|| {
++                        self.view_address_indexed(site, 0)
++                            .ok()
++                            .flatten()
++                            .map(|(lo, hi, _, _)| (lo, hi))
++                    })
+                 {
+                     words.extend([(0, lo), (1, hi)]);
+                 }
+diff --git a/crates/victory-shader/src/emit/mod.rs b/crates/victory-shader/src/emit/mod.rs
+index 4697c39..2c8e278 100644
+--- a/crates/victory-shader/src/emit/mod.rs
++++ b/crates/victory-shader/src/emit/mod.rs
+@@ -119,7 +119,7 @@ pub fn host_wave_limit() -> u32 {
+ pub use rect::rect_list_gs;
+ pub use shader::{
+     MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
+-    SLOT_STRIDES_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
++    SLOT_STRIDES_COUNT, SLOT_VIEWS, SLOT_VIEWS_COUNT, USER_DATA_SPACE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS,
+     set_view_heap_limit,
+ };
+ 
+diff --git a/crates/victory-shader/src/emit/shader.rs b/crates/victory-shader/src/emit/shader.rs
+index 9c0c8f1..9c56a36 100644
+--- a/crates/victory-shader/src/emit/shader.rs
++++ b/crates/victory-shader/src/emit/shader.rs
+@@ -27,6 +27,17 @@ pub const SLOT_STRIDES: u8 = 255;
+ /// Dwords of the [`SLOT_STRIDES`] buffer: heap indices are clamped to it.
+ pub const SLOT_STRIDES_COUNT: u32 = 1 << 21;
+ 
++/// Title addresses of the buffer views of the view heap by slot, for
++/// console code that reads a descriptor's address out of a table at an
++/// index it computes (ray-tracing structures and the programs that walk
++/// them) and finds no root view to ask the host about. Two dwords per
++/// slot: the title address of the view's first byte. Slots without a
++/// buffer view read zero. Like [`SLOT_STRIDES`], the host readies the
++/// buffer views of the whole heap when a shader has this root SRV.
++pub const SLOT_VIEWS: u8 = 252;
++/// Slots of the [`SLOT_VIEWS`] buffer (heap indices are clamped to it).
++pub const SLOT_VIEWS_COUNT: u32 = SLOT_STRIDES_COUNT;
++
+ /// Title memory by address (`resource::MEMORY`): console code reads and
+ /// writes through raw 40-bit addresses it takes from root constants,
+ /// descriptors and other memory (the ray-tracing structure builder and the
