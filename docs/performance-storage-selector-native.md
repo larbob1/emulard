@@ -1,0 +1,3 @@
+# P23/P24 isolated storage selector correctness
+
+Exact parent 7b5dfdcdad04b54f5633a0d016a723d5fcc8c2f0 (#52), exact AI5 selector snapshot 27c8e1ed06bcbe48d241bc4b5a9f8d96350c43d4. Upstream 51700c6. Verify prepared dstorage source before applying selector, then apply original test-only codec fixture. Native selector tests exercise both paths directly (two normal tests; timing fixture remains ignored). Existing worker tests retained plus fresh explicit mode checks; those are not proof of actual end-to-end selector dispatch. Existing codec gates and both builds preserved. Default-off switch is unchanged from candidate design. No timing execution or performance claim. Any release-mode timing requires correctness evidence and separate review; no title access or merge.
