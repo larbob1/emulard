@@ -121,15 +121,19 @@ mod hle_idle_boundary_review {
         assert_eq!(rx.recv_timeout(LIMIT).unwrap(), 1);
         let (queued, idle, release) = gate_rx.recv_timeout(LIMIT).unwrap();
         assert_eq!((queued, idle), (0, 1));
-        let (attempt_tx, attempt_rx) = mpsc::channel();
+        let (contended_tx, contended_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let submitter = std::thread::spawn(move || {
-            attempt_tx.send(()).unwrap();
+            // The retirement gate is still closed. Observe the actual mutex
+            // rather than merely announce that submission is about to start.
+            assert!(matches!(pool.state.try_lock(), Err(std::sync::TryLockError::WouldBlock)));
+            contended_tx.send(()).unwrap();
             submit(pool, 2);
             done_tx.send(()).unwrap();
         });
-        attempt_rx.recv_timeout(LIMIT).unwrap();
-        // The timed-out worker still holds the admission mutex.
+        contended_rx.recv_timeout(LIMIT).unwrap();
+        // The submitter observed actual contention while the gate was closed.
+        // This does not assert when its subsequent blocking lock call starts.
         assert!(done_rx.try_recv().is_err());
         assert!(rx.try_recv().is_err());
         release.send(()).unwrap();

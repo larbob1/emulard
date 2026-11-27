@@ -9,7 +9,7 @@ import test_hle_idle_cleanup_preview as cleanup
 
 MODULES = (
     (idle, "5b3f288530cbe0f81b41b5ee0f5c0a0600f23f43"),
-    (boundary, "fe75e62951cb5dc9cb368fbb2957513f1cc01052"),
+    (boundary, "b33123da451b1efac9ace2a0f06e24454de2bab2"),
     (cleanup, "1c5b96a55d170f631079247a4660e59ddb96abae"),
 )
 
@@ -82,6 +82,18 @@ class IdleSuitePreviewTests(unittest.TestCase):
         self.assertIn(b"RELEASED.store(rx.recv_timeout", self.fixtures[2])
         self.assertIn(b"RELEASED.load", self.fixtures[2])
         self.assertEqual(self.fixtures[2].count(b"}, WAIT_TIMEOUT);"), 3)
+        boundary_source = self.fixtures[1]
+        probe = b"pool.state.try_lock(), Err(std::sync::TryLockError::WouldBlock)"
+        self.assertEqual(boundary_source.count(probe), 1)
+        probe_at = boundary_source.index(probe)
+        send_at = boundary_source.index(b"contended_tx.send", probe_at)
+        submit_at = boundary_source.index(b"submit(pool, 2)", send_at)
+        recv_at = boundary_source.index(b"contended_rx.recv_timeout", submit_at)
+        release_at = boundary_source.index(b"release.send", recv_at)
+        self.assertLess(probe_at, send_at)
+        self.assertLess(send_at, submit_at)
+        self.assertLess(submit_at, recv_at)
+        self.assertLess(recv_at, release_at)
 
     def test_five_fresh_process_cases(self):
         cases = (
