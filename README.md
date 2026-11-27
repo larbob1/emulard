@@ -212,6 +212,14 @@ took 18.3 seconds, including 6.8 seconds of system mapping and 3.7 seconds
 of system unmapping across threads. The next two captured frames took
 4.9 and 2.8 seconds, including 450 and 296 milliseconds of copy-back.
 
+### Experimental unchanged-mapping fast path
+
+The paired-wave performance candidate supports `VICTORY_MAP_SKIP_SAME=1`.
+It skips host mapping calls for exact, complete physical page matches while
+retaining dirty notifications. It is disabled by default. See
+[phase 1 performance validation](docs/performance-phase1.md) for matched-run
+instructions and limitations. No sustained FPS improvement has been verified.
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`

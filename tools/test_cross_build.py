@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from pathlib import Path
 import unittest
-from cross_build import build_command, TARGET
+from cross_build import build_command, TARGET, REVISIONS
+from build_runtime import REVISION, FXCELESS_REFRESH, PAIRED_WAVE_REFRESH
 
 class CrossBuildTests(unittest.TestCase):
     def test_release_build_path(self):
@@ -21,6 +22,9 @@ class CrossBuildTests(unittest.TestCase):
         self.assertEqual(command[command.index("--profile") + 1], "diag")
         self.assertEqual(command[command.index("--features") + 1], "diagnostics")
         self.assertEqual(binary, root / "target" / TARGET / "diag" / "victory.exe")
+
+    def test_all_prepared_revisions_allowed(self):
+        self.assertEqual(REVISIONS, {REVISION, FXCELESS_REFRESH, PAIRED_WAVE_REFRESH})
 
     def test_invalid_job_count(self):
         for n in (0, -1, 65):

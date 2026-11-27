@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import sys
 
-REVISION = "2119b0e44c53aa9648307b0c5c73590290305b1f"
+from build_runtime import REVISION, FXCELESS_REFRESH, PAIRED_WAVE_REFRESH
+
+REVISIONS = frozenset((REVISION, FXCELESS_REFRESH, PAIRED_WAVE_REFRESH))
 TARGET = "x86_64-pc-windows-msvc"
 
 def build_command(root, diagnostics, jobs):
@@ -46,7 +48,7 @@ def main():
     try:
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
                                            text=True, stderr=subprocess.DEVNULL).strip()
-        if revision != REVISION:
+        if revision not in REVISIONS:
             print("Unexpected upstream revision.")
             return 1
         # The user supplies the toolchain; no package manager or privilege

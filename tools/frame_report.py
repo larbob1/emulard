@@ -17,10 +17,47 @@ PATTERN = re.compile(
     rf"without a host pipeline \((?P<compiling>[0-9]+) being made\)"
 )
 
+# Long-frame diagnostics are a separate population from interval summaries.
+# Worker totals overlap; never present them as percentages of wall time.
+REMAP_PATTERN = re.compile(
+    rf"remapping: (?P<calls>{NUMBER}) calls (?P<total_ms>{NUMBER}) ms "
+    rf"\((?P<reader_wait_ms>{NUMBER}) waiting for readers; of it the system's "
+    rf"unmapping (?P<unmap_ms>{NUMBER}), its mapping (?P<map_ms>{NUMBER}), "
+    rf"committing (?P<commit_ms>{NUMBER}), our own notes of the change "
+    rf"(?P<notes_ms>{NUMBER}); (?P<views_cut>{NUMBER}) views cut, "
+    rf"(?P<remapped_mb>{NUMBER}) MB of them mapped again"
+    rf"(?:; (?P<reused>{NUMBER}) placeholders reused, (?P<fallbacks>{NUMBER}) reuse fallbacks)?\)"
+)
+REFRESH_RE = re.compile(rf"textures: refresh (?P<refresh_ms>{NUMBER}) ms \((?P<refresh_wait_ms>{NUMBER}) waiting for memory to hold still\)")
+ALIAS_RE = re.compile(
+    rf"page mappings of the title's queues per second: (?P<calls>{NUMBER}) calls for "
+    rf"(?P<pages>{NUMBER}) pages, (?P<same>{NUMBER}) of them as they were, "
+    rf"(?P<views>{NUMBER}) views mapped, (?P<ms>{NUMBER}) ms"
+)
+
+def numeric_match(pattern, line):
+    match = pattern.search(line)
+    return {k: float(v) for k, v in match.groupdict().items() if v is not None} if match else {}
+
+def stats(rows):
+    return {key: {"median": round(median(values), 3), "max": max(values), "samples": len(values)}
+            for key in sorted({key for row in rows for key in row})
+            if (values := [row[key] for row in rows if key in row])}
+
+
 def summarize(lines, skip=0):
     rows = []
     seen = 0
+    remaps, aliases = [], []
     for line in lines:
+        if seen >= skip:
+            remap = numeric_match(REMAP_PATTERN, line)
+            if remap:
+                remap.update(numeric_match(REFRESH_RE, line))
+                remaps.append(remap)
+            alias = numeric_match(ALIAS_RE, line)
+            if alias:
+                aliases.append(alias)
         match = PATTERN.search(line)
         if match:
             seen += 1
@@ -29,12 +66,15 @@ def summarize(lines, skip=0):
             row = {key: float(value) for key, value in match.groupdict().items()}
             if row["frame"] > 0:
                 rows.append(row)
+    detailed = {"long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
+                "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases)}
     if not rows:
-        return {"samples": 0, "status": "no matching positive frame-time samples"}
+        return {"samples": 0, "status": "no matching positive frame-time samples", **detailed}
     med = {key: round(median(row[key] for row in rows), 3) for key in rows[0]}
     frame = med["frame"]
     return {
         "samples": len(rows),
+        **detailed,
         "intervals_meeting_target_without_reported_drops": sum(row["frame"] <= 100 and row["dropped"] == 0 and row["compiling"] == 0 for row in rows),
         "median_reported_interval": med,
         "target_frame_ms": 100,

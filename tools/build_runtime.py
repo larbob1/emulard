@@ -59,8 +59,12 @@ def main():
                 run(["git", "apply", str(own / "patches" / patch)], target)
             run([sys.executable, str(PATCHER.with_name("apply_pipeline_stack_patch.py")), str(target), "--apply"])
             run(["git", "apply", str(own / "patches" / "paired-wave-worker-tracing.patch")], target)
+            run([sys.executable, str(PATCHER.with_name("apply_mapping_fastpath.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
+                for mode in ("0", "1"):
+                    env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0")
+                    subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
                 run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
                 build_binaries(target)
