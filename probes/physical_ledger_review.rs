@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Review-only logical accounting model. Not linked into the runtime.
 //! Callers must prove each event corresponds to an actual lifecycle transition.
+const PAGE: u64 = 65536;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Balance {
     count: u64,
     bytes: u64,
 }
 impl Balance {
+    fn valid(self, kind: Kind) -> bool {
+        let Some(minimum) = self.count.checked_mul(PAGE) else { return false; };
+        if self.count == 0 { return self.bytes == 0; }
+        if self.bytes < minimum || self.bytes % PAGE != 0 { return false; }
+        !matches!(kind, Kind::PageId | Kind::UniqueShownPage) || self.bytes == minimum
+    }
     fn change(self, add: bool, count: u64, bytes: u64) -> Option<Self> {
         let op = if add { u64::checked_add } else { u64::checked_sub };
         Some(Self { count: op(self.count, count)?, bytes: op(self.bytes, bytes)? })
@@ -51,6 +59,12 @@ impl Ledger {
             let ok = match event {
                 Event::Added(kind, count, bytes) | Event::Removed(kind, count, bytes) => {
                     let add = matches!(event, Event::Added(..));
+                    // A no-op is not a lifecycle event. Fixed-size pages
+                    // and all positive aligned extents are checked at input.
+                    if count == 0 || !(Balance { count, bytes }).valid(kind) {
+                        self.invalid = true;
+                        return false;
+                    }
                     let b = next.balance(kind);
                     if let Some(updated) = b.change(add, count, bytes) {
                         *b = updated;
@@ -70,7 +84,11 @@ impl Ledger {
         }
         // Title view bytes include aliases; unique shown bytes count only
         // first/last entries in the actual shown index, never section size.
-        if next.unique_shown.bytes > next.title_views.bytes {
+        let balances = [(Kind::SectionHandle, next.sections), (Kind::PageId, next.page_ids),
+            (Kind::TitleView, next.title_views), (Kind::UniqueShownPage, next.unique_shown),
+            (Kind::StorageView, next.storage_views)];
+        if balances.iter().any(|&(kind, balance)| !balance.valid(kind))
+            || next.unique_shown.bytes > next.title_views.bytes {
             self.invalid = true;
             return false;
         }
@@ -87,7 +105,6 @@ mod tests {
     use super::*;
     use Event::*;
     use Kind::*;
-    const PAGE: u64 = 65536;
     fn add(k: Kind, n: u64, b: u64) -> Event { Added(k,n,b) }
     fn rem(k: Kind, n: u64, b: u64) -> Event { Removed(k,n,b) }
     #[test]
@@ -158,9 +175,10 @@ mod tests {
     #[test]
     fn overflow_does_not_wrap_or_publish_partial_counts() {
         let mut l = Ledger::default();
-        assert!(l.apply(&[add(SectionHandle,1,u64::MAX)]));
-        assert!(!l.apply(&[add(PageId,1,PAGE),add(SectionHandle,1,1)]));
-        assert_eq!(l.sections.bytes,u64::MAX);
+        let max_aligned = u64::MAX / PAGE * PAGE;
+        assert!(l.apply(&[add(SectionHandle,1,max_aligned)]));
+        assert!(!l.apply(&[add(PageId,1,PAGE),add(SectionHandle,1,PAGE)]));
+        assert_eq!(l.sections.bytes,max_aligned);
         assert_eq!(l.page_ids.bytes,0);
         assert!(l.invalid);
     }
@@ -171,4 +189,40 @@ mod tests {
         assert_eq!(l.unique_shown.bytes,0);
         assert_eq!(l.alias_excess_bytes(),None);
     }
+    #[test]
+    fn malformed_extents_fail_before_any_batch_publication() {
+        for event in [add(PageId,1,2*PAGE), add(UniqueShownPage,2,PAGE),
+            add(TitleView,1,PAGE-1), add(StorageView,0,PAGE), add(SectionHandle,1,0),
+            rem(PageId,0,0), add(SectionHandle,u64::MAX,PAGE)] {
+            let mut l = Ledger::default();
+            assert!(!l.apply(&[add(PageId,1,PAGE),event]));
+            assert!(l.invalid);
+            assert_eq!(l.page_ids,Balance::default());
+        }
+    }
+    #[test]
+    fn wrong_final_removal_and_duplicate_removal_rejected() {
+        let mut l = Ledger::default();
+        assert!(l.apply(&[add(SectionHandle,1,2*PAGE)]));
+        assert!(!l.apply(&[rem(SectionHandle,1,PAGE)]));
+        assert_eq!(l.sections,Balance{count:1,bytes:2*PAGE});
+        let mut l = Ledger::default();
+        assert!(l.apply(&[add(PageId,1,PAGE)]));
+        assert!(l.apply(&[rem(PageId,1,PAGE)]));
+        assert!(!l.apply(&[rem(PageId,1,PAGE)]));
+    }
+    #[test]
+    fn count_overflow_checked_independently_of_byte_overflow() {
+        assert_eq!(Balance{count:u64::MAX,bytes:0}.change(true,1,0),None);
+        assert_eq!(Balance{count:0,bytes:PAGE}.change(false,1,0),None);
+    }
+    #[test]
+    fn final_batch_allows_coherent_view_replacement() {
+        let mut l = Ledger::default();
+        assert!(l.apply(&[add(TitleView,1,PAGE),add(UniqueShownPage,1,PAGE)]));
+        assert!(l.apply(&[rem(TitleView,1,PAGE),add(TitleView,1,2*PAGE),
+            add(UniqueShownPage,1,PAGE)]));
+        assert_eq!(l.alias_excess_bytes(),Some(0));
+    }
+
 }
