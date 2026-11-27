@@ -40,10 +40,15 @@ jobs:
           rustc --edition 2024 --test probes/physical_publication_review.rs -o /tmp/emulard-physical-publication-tests
           /tmp/emulard-physical-publication-tests
 
+      - name: Standalone actual mapping diagnostic producer
+        run: |
+          rustc --edition 2024 --test probes/mapping_diagnostic.rs -o /tmp/emulard-mapping-diagnostic-tests
+          /tmp/emulard-mapping-diagnostic-tests
+
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-combined-playtest' || github.head_ref == 'dev/performance-phase6-combined-playtest'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-combined-playtest' || github.head_ref == 'dev/performance-phase6-combined-playtest' || github.ref == 'refs/heads/dev/performance-phase6-mapping-diagnostic-native' || github.head_ref == 'dev/performance-phase6-mapping-diagnostic-native'
     steps:
       - uses: actions/checkout@v4
         with:
