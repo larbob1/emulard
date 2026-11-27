@@ -143,6 +143,18 @@ Prepare the paired-wave translator from [fxceless PR #854](https://github.com/fx
 with Emulard's Wine memory and integer blend patches. This build composites
 the scene and overlay in retail PresentX calls. It also reads FidelityFX
 `FSPX` programs in `ACCC` containers through the shader translator.
+The paired-wave build uses the same 32 MiB pipeline worker stack as the
+baseline and captures shader inputs before translation when
+`VICTORY_SHADER_SAVE` is set.
+It also normalizes DXIL loop back edges using [upstream commit 8e14d23](https://github.com/Marvisak/VIctory/commit/8e14d23547c34d323dc5bbcbd127db2ea9c62398)
+so the Proton shader converter can handle loops with multiple back edges.
+It can also group contiguous physical page mappings and skip unchanged mappings
+using [VIctory-7900XTX commit 4180818](https://github.com/avatarmanz/VIctory-7900XTX/commit/41808180e6f362771b57ef2e78d97ddc319c8e8e).
+Set `VICTORY_MAP_RUNS=1` to enable batching. Page-by-page mapping remains
+the default after the Proton trial still showed multi-second remapping
+stalls in Story Mode.
+Placed 3D unordered-access views preserve their aliases using
+[VItoriaBr commit b6e61ab](https://github.com/uiliannn/VItoriaBr/commit/b6e61ab6311a6eed6c4c138a5cf6fd88339acba7).
 
 ```sh
 python3 tools/build_runtime.py ../runtime-paired-wave --paired-wave-refresh
@@ -160,6 +172,35 @@ were created during the Story Mode transition. The captured FidelityFX
 programs parse, then stop when the translator encounters a descriptor
 modified after loading. The two console pipeline creation methods at slots
 `0x1c8` and `0x218` remain unimplemented.
+
+### Trace the Story Mode transition
+
+In a diagnostic paired-wave build, point `VICTORY_CAPTURE` at a writable
+capture directory and set `VICTORY_CAPTURE_WORLD=1`. On selected world
+frames, `frame-<n>-plane-0.png` shows the first PresentX plane before
+compositing when there are multiple inputs. Compare it with `frame-<n>.png`,
+the composed frame. The `PresentX input` log identifies each title resource
+so it can be matched with the frame's operations. Set `VICTORY_CAPTURE_FRAMES`
+to select specific frames, or `VICTORY_CAPTURE_WORLD_ALSO=0,1` to capture
+the first two world frames too.
+
+With `VICTORY_FRAME_LOG=1`, long-frame logs split remapping into system
+unmap, map, commit and bookkeeping time using
+[fxceless commit d8986cd](https://github.com/fxceless/victory-fork/commit/d8986cd7b8392f85478f5675933c59712519e163). Compare those counters with texture
+refresh and copy-back times. Worker durations can overlap. Keep capture
+disabled for steady-state timing, since reading back selected frames adds
+a GPU wait and PNG encoding.
+
+In a local Series S run under Proton on an RTX 5060 Ti, the first plane
+was already black on the first three captured world frames. On two of
+them the second plane contained color, which reached the composed output.
+
+In that run, `VICTORY_TEXTURE_NO_WAIT=1` kept the texture refresh wait for
+stable mappings near zero by reading through the kernel or retrying on
+the next refresh. It remains opt-in. The first captured world frame still
+took 18.3 seconds, including 6.8 seconds of system mapping and 3.7 seconds
+of system unmapping across threads. The next two captured frames took
+4.9 and 2.8 seconds, including 450 and 296 milliseconds of copy-back.
 
 ### Replay tile mappings
 

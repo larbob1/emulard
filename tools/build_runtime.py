@@ -46,8 +46,15 @@ def main():
                 "wine-disk-backed-memory.patch",
                 "paired-wave-presentx.patch",
                 "paired-wave-accc.patch",
+                "paired-wave-loop-latches.patch",
+                "paired-wave-map-runs.patch",
+                "paired-wave-placed-uav.patch",
+                "paired-wave-present-capture.patch",
+                "paired-wave-remap-timing.patch",
             ):
                 run(["git", "apply", str(own / "patches" / patch)], target)
+            run([sys.executable, str(PATCHER.with_name("apply_pipeline_stack_patch.py")), str(target), "--apply"])
+            run(["git", "apply", str(own / "patches" / "paired-wave-worker-tracing.patch")], target)
             run(["git", "diff", "--check"], target)
             if ns.build:
                 run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
