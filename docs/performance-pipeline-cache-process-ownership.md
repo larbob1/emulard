@@ -49,3 +49,26 @@ synthetic private cache data; never touch title or existing user cache.
 B003 reported no usable library and zero saved bytes; these hazards do
 not explain that failure. Actual initialization HRESULT, cache ownership
 evidence, and matched cold/warm gameplay remain outstanding.
+
+## Linux lease feasibility (not runtime registration)
+
+The separate Linux-only test uses a persistent sidecar and nonblocking
+flock on an open file handle. The contender returns without writing the
+synthetic marker if the lease is busy; an independent directory can
+progress. The same sidecar inode survives normal exit and abrupt death
+of the fixture's own child process. A directory symlink resolves to the
+same sidecar. All waits have finite test deadlines. This does not prove
+Windows byte-range locks, Wine/Proton interop, hostile directory changes,
+network filesystems, or protection against non-cooperating writers.
+Never delete/recreate the sidecar to recover a supposedly stale lock.
+
+A separate source finding: upstream library.rs::save returns immediately
+if library() is None, before snapshotting/writing USED. In the observed
+no-library startup, this prevents the normal save path from persisting
+early-list changes even if shader translation succeeds. It does not prove
+whether a previous list already existed, or how much prewarming would
+help. A future candidate could decouple early-list-only persistence from
+driver library availability, but must first establish cache ownership,
+preserve RenderDoc policy, retain dirty state on failed writes, and avoid
+new shared-cache writes without coordinator approval. No such production
+change is included here.
