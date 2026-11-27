@@ -12,7 +12,8 @@ Mission: sustained, correctly rendered 30 FPS. Current owner-reported Proton gam
 | AI 1 Memory / coordinator | dev/performance-phase6-software-pages; existing memory candidates; dev/performance-phase6 integration | [#11](https://github.com/larbob1/emulard/issues/11) |
 | AI 2 Graphics | dev/performance-phase6-graphics | [#12](https://github.com/larbob1/emulard/issues/12) |
 | AI 3 Reliability | dev/performance-phase6-reliability | [#13](https://github.com/larbob1/emulard/issues/13) |
-| Project owner | Priorities, actual gameplay tests, merge authorization | — |
+| AI 4 Local validation | dev/performance-phase6-local-validation | [#27](https://github.com/larbob1/emulard/issues/27) |
+| Project owner | Priorities, supervised gameplay tests, merge authorization | — |
 
 Coordinator alone writes canonical coordination documents, integration branch and deferred register. Other agents post claims, progress, conflicts and handoffs in their own GitHub issue and PR. Agents cannot see each other's chats; GitHub is the shared record. Rules are procedural, not enforced by branch permissions. Owner grants access separately; never share passwords or tokens.
 
@@ -25,3 +26,5 @@ Coordinator alone writes canonical coordination documents, integration branch an
 ## Validation and review
 Open a draft PR against dev/performance-phase6. Include task ID, base/upstream SHA, affected paths and anchors, flags, tests with exact results/CI links, untested assumptions and blockers. Run Python regression tests and relevant actual runtime tests; verify nonempty test filters. Do not claim a native build or FPS gain without evidence. Existing synthetic CI matches performance branch names, but native/portable CI conditions may require coordinator changes; request approval, do not silently edit shared workflows. Coordinator checks combined CI, owner authorizes merges.
 Keep private logs, title data, credentials, keys and proprietary assets out of GitHub. Share only reviewed numeric summaries and synthetic fixtures. No promise of background work. At session end post handoff per HANDOFF.md; preserve all unresolved P-IDs.
+
+AI 4 collects local runtime evidence only; AI 3 owns reporting/acceptance tools. AI 4 must verify enforced read-only title isolation before every launch; never modify or upload title files, bypass access controls, or change system configuration without owner approval. See ONBOARD-LOCAL.md. Local evidence claims may use issue handoff without a PR when no source changes are made.

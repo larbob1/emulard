@@ -46,3 +46,6 @@ P05 #25 7f7db1e synthetic passed 115 Python +4 range +6 hint +10 portable copy e
 
 ### P10/P12 handoff
 #26 47ec512 test-only alias proof, initial compile error fixed; synthetic job passed 114 Python/17 standalone Rust, portable prep final pending; schedule native after current jobs. #25 0e48e3b native active alongside #23. Existing MANY_VIEWS omissions prevent use as exact footprint; remap lock is not data writer lock. Next audit complete live mutation domains, implement synchronized publication design with AI2, review actual mapping performance data and get frozen #18 Proton smoke. No merge or gameplay result.
+
+### AI4 workstream
+AI4 #27 assigned local evidence collection, with read-only title isolation, supervised baseline and frozen #18 candidate order; first loading-only smoke and build blocker recorded in BENCHMARKS. Native #23 42/42 groups passed, final #26 portable job passed. Next local gameplay validation and review exact AI2/AI3 proposed hooks; no new FPS result.
