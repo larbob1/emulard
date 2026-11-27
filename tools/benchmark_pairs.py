@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Local paired benchmark aggregation; never publishes raw logs or paths."""
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 from statistics import median
 from math import isfinite
@@ -65,8 +67,37 @@ def aggregate(pairs, visible=False):
         "at_least_three_usable_interval_pairs": len(intervals) >= 3,
         "at_least_three_usable_individual_pairs": len(frames) >= 3,
         "operator_reported_visible_scene": visible,
-        "note": "Operator must match scene/settings/warmup and independent runs. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. This report is not a release gate.",
+        "note": "Operator must match scene/settings/warmup and independent runs. Distinct log contents do not prove independent trials or matched workloads. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. This report is not a release gate.",
     }
+
+def read_distinct_log(path, seen_paths, seen_contents, skip, skip_frame_batches, target_fps):
+    resolved = path.resolve()
+    if resolved in seen_paths:
+        raise ValueError("repeated_input_path")
+    digest = hashlib.sha256()
+    with path.open(encoding="utf-8", errors="replace", newline=None) as handle:
+        before = os.fstat(handle.fileno())
+
+        def observed_lines():
+            for line in handle:
+                # Hash exactly the text the parser consumes. Universal newlines
+                # make CRLF/LF copies equivalent; normalize final newline too.
+                digest.update(line.rstrip("\n").encode("utf-8"))
+                digest.update(b"\n")
+                yield line
+
+        report = summarize(observed_lines(), skip, skip_frame_batches, target_fps)
+        after = os.fstat(handle.fileno())
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError("input_changed_during_read")
+    fingerprint = digest.digest()
+    if fingerprint in seen_contents:
+        raise ValueError("repeated_log_content")
+    seen_paths.add(resolved)
+    seen_contents.add(fingerprint)
+    return report
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -85,22 +116,22 @@ def main():
     try:
         pairs = []
         seen_paths = set()
+        seen_contents = set()
         for paths in args.pair:
-            reports = []
-            for path in paths:
-                resolved = path.resolve()
-                if resolved in seen_paths:
-                    raise ValueError("Repeated input path")
-                seen_paths.add(resolved)
-                with path.open(encoding="utf-8", errors="replace") as handle:
-                    reports.append(summarize(handle, args.skip, args.skip_frame_batches, args.target_fps))
-            pairs.append(reports)
+            pairs.append([read_distinct_log(path, seen_paths, seen_contents, args.skip,
+                                          args.skip_frame_batches, args.target_fps) for path in paths])
         result = aggregate(pairs, args.visible_scene_confirmed)
         result["target_fps"] = args.target_fps
         result["warmup_intervals"] = args.skip
         result["warmup_frame_batches"] = args.skip_frame_batches
-    except (OSError, ValueError):
-        print(json.dumps({"status": "unavailable or insufficient benchmark data"}))
+        result["distinct_normalized_log_contents"] = len(seen_contents)
+        result["independent_trials_verified"] = False
+        result["matched_workload_verified"] = False
+    except (OSError, ValueError) as exc:
+        reason = str(exc)
+        allowed = {"repeated_input_path", "repeated_log_content", "input_changed_during_read"}
+        print(json.dumps({"status": "unavailable or insufficient benchmark data",
+                          "reason": reason if reason in allowed else "invalid_or_unavailable"}))
         return 1
     print(json.dumps(result, indent=2, allow_nan=False))
     return 0
