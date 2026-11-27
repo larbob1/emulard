@@ -21,13 +21,14 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P11 | 3 | Candidate | Validate bounded texture snapshots and generation retries; measure lock wait vs added copy cost, stale snapshot behavior and starvation. Retain original path. |
 | P12 | 3 | Open | Replace global epoch with per-range generations, validate all mapping and free/protect paths and non-overlapping reader concurrency. |
 | P13 | 4 | Open | Production completion-scoped dirty tracking; integrate per-flight descriptors, faults, atomics, alias notifications and completion fences. |
-| P14 | 4 | Open | Reduce synchronous readback/copy-back and redundant buffer hashing; maintain exact visibility and fence semantics. |
-| P15 | 4 | Open | Persistent resources, staging reuse, async transfers, texture refresh/detiling optimization and VRAM/RAM budget validation. |
+| P14 | 4 | Candidate | Optional exact AVX2 scan and sparse merge are implemented; benchmark and validate. Actual GPU readback bandwidth, redundant hashing and synchronization reductions remain open; maintain exact visibility and fences. |
+| P15 | 4 | Candidate | Optional hard idle snapshot budget implemented; validate memory pressure and allocation churn. Persistent resources, staging reuse, async transfers, detiling and VRAM/RAM budget validation remain open. |
 | P16 | 5 | Open | Unsupported shader operations, paired-wave semantics, waterfall loops, FidelityFX descriptor mutation, missing pipeline methods; ensure scene rendering correctness. |
 | P17 | 5 | Open | Persistent pipeline/shader cache correctness and performance, compile worker stability, native-wave specialization, dropped draws. |
 | P18 | 6 | Open | Descriptor and command list caching, storage worker tuning, release/PGO evaluation, native Linux backend feasibility. |
 | P19 | 6 | Open | Consolidate validated improvements across runtime variants, improve CI and run end-to-end correctness/performance acceptance; close only with evidence. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
+| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. |
 
 ## Current state
 
@@ -35,4 +36,6 @@ Phases 1 and 2: opt-in implementation candidates committed; no runtime
 compilation or gameplay measurements independently verified here.
 Phase 3: short-lock snapshot candidate and standalone range-gate prototype.
 The global mapping lock remains the production safety mechanism.
-Phases 4–6 are not implemented. Keep this register updated in each phase.
+Phase 4: opt-in GPU copy-back scan/merge and idle snapshot budget candidates;
+production shader dirty bitmap and asynchronous readbacks remain deferred.
+Phases 5–6 are not implemented. Keep this register updated in each phase.
