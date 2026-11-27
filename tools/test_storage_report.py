@@ -51,11 +51,52 @@ class StorageReportTests(unittest.TestCase):
         self.assertEqual(compare_storage(good, good)["destination_rate_ratio"], 1)
         self.assertEqual(compare_storage(zero, good)["destination_rate_delta"], 20)
 
+    def test_physical_destination_evidence_and_failure(self):
+        prefix = "private-offset dstorage: "
+        retry = prefix + "a destination's physical pages written after a retry"
+        exhausted = prefix + "retries used up (VICTORY_DSTORAGE_RETRIES)"
+        failed = prefix + "a destination's physical pages could not be written (unknown page or a host failure); its request fails"
+        queue = prefix + "a queue half full submitted itself; reads into physical pages wait for the title's Submit"
+        clean = summarize_storage(configuration() + [window()])
+        self.assertFalse(clean["physical_destination_attempt_evidence"])
+        queued = summarize_storage(configuration() + [queue, window()])
+        self.assertFalse(queued["physical_destination_attempt_evidence"])
+        self.assertEqual(queued["physical_destination_observations"]["half_full_queue_lines"], 1)
+        good = summarize_storage(configuration() + [window(), retry, window()], skip=1)
+        self.assertTrue(good["physical_destination_attempt_evidence"])
+        self.assertFalse(good["storage_page_lookup_execution_verified"])
+        self.assertTrue(compare_storage(clean, good)["comparison_usable"])
+        bad = summarize_storage(configuration() + [exhausted, failed, window(), window()], skip=1)
+        self.assertTrue(bad["physical_destination_failure_observed"])
+        self.assertEqual(bad["physical_destination_observations"]["retry_exhausted_lines"], 1)
+        self.assertEqual(bad["physical_destination_observations"]["physical_write_failure_lines"], 1)
+        self.assertFalse(compare_storage(clean, bad)["comparison_usable"])
+        self.assertIsNone(compare_storage(clean, bad)["destination_rate_ratio"])
+        self.assertNotIn("private-offset", str(bad))
+
+    def test_no_finished_requests_is_not_comparison_evidence(self):
+        empty = summarize_storage(configuration() + [window().replace("requests=10", "requests=0")])
+        self.assertEqual(empty["finished_requests"], 0)
+        self.assertFalse(compare_storage(empty, empty)["comparison_usable"])
+
+    def test_cli_rejects_copied_normalized_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a, b = (Path(directory) / name for name in ("private-a.log", "private-b.log"))
+            lines = configuration() + [window()]
+            a.write_bytes(("\n".join(lines) + "\n").encode())
+            b.write_bytes("\r\n".join(lines).encode())
+            proc = subprocess.run([sys.executable, str(Path(__file__).with_name("storage_report.py")),
+                                   str(b), "--baseline", str(a), "--skip", "0"],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(json.loads(proc.stdout)["reason"], "repeated_log_content")
+            self.assertNotIn(directory, proc.stdout)
+
     def test_cli_numeric_output_no_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             a, b = (Path(directory) / name for name in ("private-a.log", "private-b.log"))
-            for p in (a, b):
-                p.write_text("\n".join(configuration() + [window()]), encoding="utf-8")
+            a.write_text("\n".join(configuration() + [window()]), encoding="utf-8")
+            b.write_text("\n".join(configuration() + [window(rate=30)]), encoding="utf-8")
             proc = subprocess.run([sys.executable, str(Path(__file__).with_name("storage_report.py")),
                                    str(b), "--baseline", str(a), "--skip", "0"],
                                   capture_output=True, text=True)

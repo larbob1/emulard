@@ -28,3 +28,27 @@ Record per trial: revision, actual worker count, correct visible frames / elapse
 ## Acceptance and next action
 
 No measured result yet. Do not select a cap merely because it increases destination MB/s. Require safe completion, no visual regressions, repeatable frame-time improvement and no regression in the reference workload. Report any missing sample windows explicitly; if debugging overhead materially changes the workload, repeat timing with matched lower-volume logging. Compare actual results with the coordinator before requesting new instrumentation or changing defaults. P23 remains open until owner-run measurements and correctness evidence are available.
+
+## D17 bounded #29 physical-page lookup comparison
+
+The coordinator permits a conditional protected same-settings #29 test
+only after the frozen #18 control and host recovery. Keep the existing
+165s ceiling and earlier stop conditions; no repeated retries at RAM limit.
+Do not vary worker caps when comparing VICTORY_STORAGE_PAGE_LOOKUP=0/1.
+Generic DirectStorage activity does not prove that the changed physical-page
+lookup ran: pinned into_destination calls page_window on physical destinations
+and queries pages_known on exhausted retry; ordinary successful physical writes
+may not log a dedicated marker. The parser now counts exact known retry-success,
+retry-exhausted, physical-write-failure and early/half-full queue messages
+across all supplied lines including skipped warmup. Queue messages alone
+are not proof of a completed physical write. Counts are message lines, not
+unique requests; exhausted and failure lines may describe the same request.
+No offsets, page identifiers or raw data leave the report. Missing markers
+are not evidence of no failures, and never certify fast-path coverage.
+Observed exhausted retries or physical write failure suppress throughput
+ratios; both sides need positive finished-request counts and valid windows.
+CLI rejects repeated paths or identical normalized decoded log contents,
+including newline conversions; common concurrent file changes are refused.
+Distinct contents do not prove independent trials or matched workloads.
+No path-execution proof without separate reviewed instrumentation. This is
+an exploratory control, not a gameplay acceptance or a new launch approval.
