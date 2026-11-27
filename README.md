@@ -236,6 +236,13 @@ detiling. It is opt-in; no sustained FPS gain has been verified. See
 [phase 3 validation](docs/performance-phase3.md) and the cumulative
 [performance deferred-work register](docs/performance-deferred.md).
 
+### Experimental GPU copy-back CPU work
+
+The Phase 4 paired-wave candidate offers opt-in `VICTORY_BACK_AVX2=1`,
+`VICTORY_BACK_SPARSE_MERGE=1` and an optional idle snapshot capacity
+`VICTORY_BACK_IDLE_MB`. See [Phase 4 validation](docs/performance-phase4.md)
+for independent tests, caveats and the deferred production dirty bitmap.
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`

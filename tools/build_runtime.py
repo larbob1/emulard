@@ -62,6 +62,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_fastpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_diff.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_texture_snapshot.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_gpu_copy_perf.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 for mode in ("0", "1"):
@@ -72,6 +73,11 @@ def main():
                     subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
                     subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping"], cwd=target, env=env, check=True)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_tests"], target)
+                run(["cargo", "test", "--locked", "-p", "victory-gpu", "perf4_tests"], target)
+                for enabled in ("0", "1"):
+                    env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
+                    for suite in ("difference_tests", "merge_tests"):
+                        subprocess.run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], cwd=target, env=env, check=True)
                 run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
                 build_binaries(target)
