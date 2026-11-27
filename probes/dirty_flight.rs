@@ -30,15 +30,26 @@ impl FenceDomain {
     fn matches(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
 }
 
-/// Acknowledgements from the serialized publication owner. A true value
-/// is only a model assertion; production needs actual ordered operations.
-#[derive(Clone, Copy)]
-pub struct Publication {
-    pub handback: bool,
-    pub generations_and_aliases: bool,
-    pub readback_visible: bool,
-    pub ordered_title_signals: bool,
+/// Ordered publication stages. This is a serial protocol model, not a
+/// lock or an implementation of the effects themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage { Handback, GenerationsAndAliases, ReadbackVisible, TitleSignals }
+
+impl Stage {
+    fn next(self) -> Option<Self> {
+        match self {
+            Self::Handback => Some(Self::GenerationsAndAliases),
+            Self::GenerationsAndAliases => Some(Self::ReadbackVisible),
+            Self::ReadbackVisible => Some(Self::TitleSignals),
+            Self::TitleSignals => None,
+        }
+    }
 }
+
+/// Only an externally proven no-effect failure may be retried directly.
+/// Unknown or partially applied effects require external reconciliation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome { Done, NoEffect, Uncertain }
 
 // These are assertions in the model, not evidence from actual shader analysis.
 // Every category is necessary; none can be inferred from a zero bitmap.
@@ -77,7 +88,7 @@ pub enum Plan {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Error { NotCompleted, NotPlanned, AlreadyPlanned, AlreadyPublished, NotPublished, InvalidFence, PublicationFailed }
+pub enum Error { NotCompleted, NotPlanned, AlreadyPlanned, AlreadyPublished, NotPublished, InvalidFence, PublicationFailed, WrongStage, Quarantined }
 
 pub struct Flight<T> {
     ticket: Ticket,
@@ -87,13 +98,14 @@ pub struct Flight<T> {
     // Model-only stand-in for an aggregate of real retained backing and descriptor leases.
     pin: Option<Arc<T>>,
     plan: Option<Plan>,
-    published: bool,
+    next_stage: Option<Stage>,
+    quarantined: bool,
 }
 
 impl<T> Flight<T> {
     pub fn new(domain: FenceDomain, fence: u64, region: Span, pin: Arc<T>) -> Result<Self, Error> {
         if fence == 0 || fence == u64::MAX { return Err(Error::InvalidFence); }
-        Ok(Self { ticket: Ticket(Arc::new(())), fence, domain, region, pin: Some(pin), plan: None, published: false })
+        Ok(Self { ticket: Ticket(Arc::new(())), fence, domain, region, pin: Some(pin), plan: None, next_stage: Some(Stage::Handback), quarantined: false })
     }
 
     pub fn ticket(&self) -> Ticket { self.ticket.clone() }
@@ -138,22 +150,35 @@ impl<T> Flight<T> {
         Some(Plan::Sparse(spans))
     }
 
-    // Model publication as a single acknowledgement from the external
-    // serialized handback/invalidation owner. Actual write, alias and
-    // generation publication are not performed here.
-    pub fn publish(&mut self, proof: Publication) -> Result<(), Error> {
+    // Invoke a stage only after all previous stages completed. Mark the
+    // flight uncertain before executing any effect: even a panic/unwind
+    // must not permit automatic replay. The closure's result is a modeled
+    // assertion; the real caller needs an audited effect/recovery contract.
+    pub fn step(&mut self, stage: Stage, effect: impl FnOnce() -> Outcome) -> Result<(), Error> {
         if self.plan.is_none() { return Err(Error::NotPlanned); }
-        if self.published { return Err(Error::AlreadyPublished); }
-        if !proof.handback || !proof.generations_and_aliases || !proof.readback_visible
-            || !proof.ordered_title_signals { return Err(Error::PublicationFailed); }
-        self.published = true;
-        Ok(())
+        if self.quarantined { return Err(Error::Quarantined); }
+        let expected = self.next_stage.ok_or(Error::AlreadyPublished)?;
+        if stage != expected { return Err(Error::WrongStage); }
+        self.quarantined = true;
+        match effect() {
+            Outcome::Done => {
+                self.next_stage = stage.next();
+                self.quarantined = false;
+                Ok(())
+            }
+            Outcome::NoEffect => {
+                self.quarantined = false;
+                Err(Error::PublicationFailed)
+            }
+            Outcome::Uncertain => Err(Error::Quarantined),
+        }
     }
 
     // Explicit successful release only. Dropping this model itself is NOT
     // a safe production cancellation path; a real owner must retain failures.
     pub fn retire(&mut self) -> Result<Arc<T>, Error> {
-        if !self.published { return Err(Error::NotPublished); }
+        if self.quarantined { return Err(Error::Quarantined); }
+        if self.plan.is_none() || self.next_stage.is_some() { return Err(Error::NotPublished); }
         self.pin.take().ok_or(Error::NotPublished)
     }
 }
@@ -168,8 +193,9 @@ mod tests {
     fn flight(start: u64, len: u64) -> Flight<()> {
         Flight::new(FenceDomain::new(), 7, Span::new(start, len).unwrap(), Arc::new(())).unwrap()
     }
-    fn proof(handback: bool, generation: bool) -> Publication {
-        Publication { handback, generations_and_aliases: generation, readback_visible: true, ordered_title_signals: true }
+    const STAGES: [Stage; 4] = [Stage::Handback, Stage::GenerationsAndAliases, Stage::ReadbackVisible, Stage::TitleSignals];
+    fn finish<T>(f: &mut Flight<T>) {
+        for stage in STAGES { f.step(stage, || Outcome::Done).unwrap(); }
     }
     // Helper uses the owning fence domain, except explicit wrong-domain tests.
     fn plan<'a, T>(f: &'a mut Flight<T>, value: u64, report: Option<&Report>) -> Result<&'a Plan, Error> {
@@ -223,16 +249,84 @@ mod tests {
     fn readback_and_title_signal_acknowledgements_required() {
         let mut f = flight(0, PAGE);
         plan(&mut f, 7, None).unwrap();
-        let mut p = proof(true, true);
-        p.readback_visible = false;
-        assert_eq!(f.publish(p), Err(Error::PublicationFailed));
+        f.step(Stage::Handback, || Outcome::Done).unwrap();
+        f.step(Stage::GenerationsAndAliases, || Outcome::Done).unwrap();
+        assert_eq!(f.step(Stage::ReadbackVisible, || Outcome::NoEffect), Err(Error::PublicationFailed));
         assert_eq!(f.retire(), Err(Error::NotPublished));
-        p.readback_visible = true;
-        p.ordered_title_signals = false;
-        assert_eq!(f.publish(p), Err(Error::PublicationFailed));
+        f.step(Stage::ReadbackVisible, || Outcome::Done).unwrap();
+        assert_eq!(f.step(Stage::TitleSignals, || Outcome::NoEffect), Err(Error::PublicationFailed));
         assert_eq!(f.retire(), Err(Error::NotPublished));
-        assert!(f.publish(proof(true, true)).is_ok());
+        f.step(Stage::TitleSignals, || Outcome::Done).unwrap();
         assert!(f.retire().is_ok());
+    }
+
+    #[test]
+    fn duplicate_or_out_of_order_effect_never_executes() {
+        let mut f = flight(0, PAGE);
+        assert_eq!(f.step(Stage::Handback, || panic!("before plan")), Err(Error::NotPlanned));
+        plan(&mut f, 7, None).unwrap();
+        for stage in STAGES {
+            for wrong in STAGES {
+                if wrong != stage {
+                    assert_eq!(f.step(wrong, || panic!("wrong stage executed")), Err(Error::WrongStage));
+                }
+            }
+            f.step(stage, || Outcome::Done).unwrap();
+        }
+        assert_eq!(f.step(Stage::Handback, || panic!("repeated effect")), Err(Error::AlreadyPublished));
+        assert!(f.retire().is_ok());
+    }
+
+    #[test]
+    fn definite_no_effect_failure_retries_only_current_stage() {
+        for failing in 0..STAGES.len() {
+            let mut f = flight(0, PAGE);
+            plan(&mut f, 7, None).unwrap();
+            let mut successes = Vec::new();
+            for (i, stage) in STAGES.into_iter().enumerate() {
+                if i == failing {
+                    for _ in 0..3 {
+                        assert_eq!(f.step(stage, || Outcome::NoEffect), Err(Error::PublicationFailed));
+                        assert_eq!(f.retire(), Err(Error::NotPublished));
+                    }
+                    for old in &STAGES[..i] {
+                        assert_eq!(f.step(*old, || panic!("replayed prior effect")), Err(Error::WrongStage));
+                    }
+                }
+                f.step(stage, || { successes.push(stage); Outcome::Done }).unwrap();
+            }
+            assert_eq!(successes, STAGES);
+            assert!(f.retire().is_ok());
+        }
+    }
+
+    #[test]
+    fn uncertain_failure_at_every_stage_quarantines_and_retains_lease() {
+        for failing in 0..STAGES.len() {
+            let pin = Arc::new(42);
+            let weak = Arc::downgrade(&pin);
+            let mut f = Flight::new(FenceDomain::new(), 7, Span::new(0, PAGE).unwrap(), pin).unwrap();
+            plan(&mut f, 7, None).unwrap();
+            for stage in &STAGES[..failing] { f.step(*stage, || Outcome::Done).unwrap(); }
+            assert_eq!(f.step(STAGES[failing], || Outcome::Uncertain), Err(Error::Quarantined));
+            for stage in STAGES {
+                assert_eq!(f.step(stage, || panic!("quarantined effect")), Err(Error::Quarantined));
+            }
+            assert_eq!(f.retire(), Err(Error::Quarantined));
+            assert!(weak.upgrade().is_some());
+        }
+    }
+
+    #[test]
+    fn unwinding_effect_quarantines_before_automatic_retry() {
+        let mut f = flight(0, PAGE);
+        plan(&mut f, 7, None).unwrap();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = f.step(Stage::Handback, || panic!("uncertain side effects"));
+        }));
+        assert!(result.is_err());
+        assert_eq!(f.step(Stage::Handback, || panic!("replayed effect")), Err(Error::Quarantined));
+        assert_eq!(f.retire(), Err(Error::Quarantined));
     }
 
     #[test]
@@ -286,16 +380,16 @@ mod tests {
         let pin = Arc::new(42u32);
         let weak = Arc::downgrade(&pin);
         let mut f = Flight::new(FenceDomain::new(), 7, Span::new(0, PAGE).unwrap(), pin).unwrap();
-        assert_eq!(f.publish(proof(true, true)), Err(Error::NotPlanned));
+        assert_eq!(f.step(Stage::Handback, || Outcome::Done), Err(Error::NotPlanned));
         assert_eq!(f.retire(), Err(Error::NotPublished));
         assert_eq!(plan(&mut f, 7, None), Ok(&Plan::Authoritative));
-        for (handback, generation) in [(false, false), (false, true), (true, false)] {
-            assert_eq!(f.publish(proof(handback, generation)), Err(Error::PublicationFailed));
+        for stage in STAGES {
+            assert_eq!(f.step(stage, || Outcome::NoEffect), Err(Error::PublicationFailed));
             assert_eq!(f.retire(), Err(Error::NotPublished));
             assert!(weak.upgrade().is_some());
+            f.step(stage, || Outcome::Done).unwrap();
         }
-        assert_eq!(f.publish(proof(true, true)), Ok(()));
-        assert_eq!(f.publish(proof(true, true)), Err(Error::AlreadyPublished));
+        assert_eq!(f.step(Stage::Handback, || Outcome::Done), Err(Error::AlreadyPublished));
         let retired = f.retire().unwrap();
         assert_eq!(*retired, 42);
         drop(retired);
@@ -309,12 +403,12 @@ mod tests {
         let mut a = Flight::new(FenceDomain::new(), 1, Span::new(0, PAGE).unwrap(), pin.clone()).unwrap();
         let mut b = Flight::new(FenceDomain::new(), 2, Span::new(0, PAGE).unwrap(), pin).unwrap();
         plan(&mut a, 1, None).unwrap();
-        a.publish(proof(true, true)).unwrap();
+        finish(&mut a);
         drop(a.retire().unwrap());
         assert!(weak.upgrade().is_some());
         assert_eq!(plan(&mut b, 1, None), Err(Error::NotCompleted));
         plan(&mut b, 2, None).unwrap();
-        b.publish(proof(true, true)).unwrap();
+        finish(&mut b);
         drop(b.retire().unwrap());
         assert!(weak.upgrade().is_none());
     }

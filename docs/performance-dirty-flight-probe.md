@@ -29,11 +29,18 @@ incomplete/wrong-domain fence cannot plan. The retained Arc is a stand-in
 for an aggregate of actual backing and descriptor leases. Retirement is
 explicitly permitted only after handback, generation/alias publication,
 readback visibility and ordered title signals are all acknowledged.
-Failed acknowledgements retain the lease. A real owner must retain failed flights even if an API object is
-dropped, prevent duplicate publication on partial failure, and implement
-ordered shutdown/device-loss recovery. This serial model is not such an
-owner or a synchronization primitive; the bool acknowledgements are not
-proof that real writes or generation invalidations happened.
+The model now gates effects through four ordered stages. A completed stage
+cannot execute again. A proven no-effect failure permits retry of only
+that stage; an uncertain outcome or unwind quarantines the flight before
+any automatic retry or retirement. This models sequencing, not actual
+writes, recovery, locks or GPU synchronization. Real ownership must retain
+failed flights independently of caller drop and implement explicit
+reconciliation, ordered shutdown and device-loss handling. The stages are
+logical milestones, not permission to move existing runtime operations.
+Readback operations that mutate title memory must also publish their
+actual alias/generation changes under the agreed mutation guard before
+visibility is acknowledged. Title signaling and resource reuse ordering
+across multiple flights remains a coordinator-reviewed requirement.
 
 ## Proposed integration boundaries — approval required
 
@@ -54,8 +61,8 @@ until approved and all native suites pass; no assumed FPS gain.
 ## Tests
 
 `python -m unittest discover -s tools -p test_dirty_flight.py`
-compiles the actual model with rustc. Eleven cases exercise partial-page
+compiles the actual model with rustc. Fifteen cases exercise partial-page
 clipping, zero/full masks, incomplete fence and device loss, stale
 ticket/fence, every coverage category, malformed/oversized masks,
 publication failure, wrong fence domain, required readback/signal acknowledgements and independent retained leases, plus randomized
-page oracle across bitmap word boundaries. CPU-only, no hardware tests.
+page oracle across bitmap word boundaries. New cases reject duplicate/out-of-order effects, retry proven no-effect failures without replaying successful stages, quarantine uncertain outcomes at every stage, and quarantine unwinding effects. CPU-only, no hardware tests.
