@@ -152,6 +152,32 @@ class AcceptanceTests(unittest.TestCase):
                 self.assertEqual(json.loads(output.call_args.args[0])["status"],
                                  "invalid_or_unavailable_evidence")
 
+    def test_cli_ambiguous_manifest_refused_before_log_reads(self):
+        from gameplay_acceptance import main
+        manifest, _ = fixture()
+        valid = json.dumps(manifest)
+        bad_inputs = [
+            valid.replace('"full_scene": true', '"full_scene": false, "full_scene": true', 1),
+            valid.replace('"elapsed_seconds": 600', '"elapsed_seconds": NaN', 1),
+            valid.replace('"elapsed_seconds": 600', '"elapsed_seconds": Infinity', 1),
+            valid.replace('"elapsed_seconds": 600', '"elapsed_seconds": -Infinity', 1),
+            valid[:-1] + ', "runs": []}',
+            '{"nested":' + '[' * 2000 + '0' + ']' * 2000 + '}',
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            p = Path(directory) / "manifest.json"
+            for bad in bad_inputs:
+                with self.subTest(case=bad_inputs.index(bad)):
+                    self.assertNotEqual(bad, valid)
+                    p.write_text(bad, encoding="utf-8")
+                    with patch.object(sys, "argv", ["gameplay_acceptance.py", str(p)]), \
+                         patch("gameplay_acceptance.read_distinct_log") as read_log, \
+                         patch("builtins.print") as output:
+                        self.assertEqual(main(), 1)
+                        read_log.assert_not_called()
+                        self.assertEqual(json.loads(output.call_args.args[0]),
+                                         {"status": "invalid_or_unavailable_evidence"})
+
     def test_cli_duplicate_content_and_success(self):
         manifest, lines = fixture()
         with tempfile.TemporaryDirectory() as directory:

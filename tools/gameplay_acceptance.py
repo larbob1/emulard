@@ -172,12 +172,27 @@ def evaluate(manifest, reports):
     }
 
 
+def unique_manifest_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate manifest field")
+        result[key] = value
+    return result
+
+
+def reject_manifest_constant(value):
+    raise ValueError("nonfinite manifest constant")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
     try:
-        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"),
+                              object_pairs_hook=unique_manifest_object,
+                              parse_constant=reject_manifest_constant)
         if not isinstance(manifest, dict) or not isinstance(manifest.get("runs"), list):
             raise ValueError("invalid manifest")
         paths, digests, reports = set(), set(), []
@@ -189,7 +204,7 @@ def main():
             # checks as paired benchmarks. Keep all evidence local.
             reports.append(read_distinct_log(path, paths, digests, 0, 0, 30))
         result = evaluate(manifest, reports)
-    except (OSError, ValueError, TypeError, OverflowError):
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
         print(json.dumps({"status": "invalid_or_unavailable_evidence"}))
         return 1
     print(json.dumps(result, indent=2, allow_nan=False))
