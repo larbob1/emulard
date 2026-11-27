@@ -1,9 +1,10 @@
 # Start here — replacement AI chats
 
-Use these six **universal starting prompts** when a developer chat reaches its conversation limit, is lost, or needs to be replaced. Each is a complete copy-and-paste prompt, independent of the previous conversation.
+Use these **universal starting prompts** for the six regular agents and AI0, an independent occasional contributor, when a developer chat reaches its conversation limit, is lost, or needs to be replaced. Each is a complete copy-and-paste prompt, independent of the previous conversation.
 
 | AI | Role | Prompt | Workstream |
 | --- | --- | --- | --- |
+| AI 0 | Independent occasional contributor (not concurrent with main team) | [ONBOARD-INDEPENDENT.md](ONBOARD-INDEPENDENT.md) | [#55](https://github.com/larbob1/emulard/issues/55) |
 | AI 1 | Lead coordinator / memory | [ONBOARD-COORDINATOR.md](ONBOARD-COORDINATOR.md) | [#11](https://github.com/larbob1/emulard/issues/11) |
 | AI 2 | Graphics / shaders / pipelines | [ONBOARD-GRAPHICS.md](ONBOARD-GRAPHICS.md) | [#12](https://github.com/larbob1/emulard/issues/12) |
 | AI 3 | Performance / reliability | [ONBOARD-RELIABILITY.md](ONBOARD-RELIABILITY.md) | [#13](https://github.com/larbob1/emulard/issues/13) |
@@ -18,7 +19,9 @@ Use these six **universal starting prompts** when a developer chat reaches its c
 3. The replacement agent must read the live repository, current decisions, issue handoffs, branch heads and CI, and resume its own latest task. It must not treat this index or the initial prompt as a frozen progress snapshot.
 4. Tell it to continue. The prompts instruct each AI to keep a persistent GitHub checkpoint after substantive milestones so that the next replacement can recover even if the old chat ended abruptly.
 
-The project owner retains priority and merge authority. Current local testing authorization is recorded in the coordination decisions and #27; never infer broader permission from this index. [AGENTS.md](../AGENTS.md) is the shared agreement. The six prompts are maintained on the coordination branch, not the novice-facing main branch.
+The project owner retains priority and merge authority. Current local testing authorization is recorded in the coordination decisions and #27; never infer broader permission from this index. [AGENTS.md](../AGENTS.md) is the shared agreement. All seven prompts are maintained on the coordination branch, not the novice-facing main branch.
 
 
-Owner clarification (D23): AI4 is the only agent permitted access to the owner's computer, local files, local shell, local runtime and game installation. AI1/AI2/AI3/AI5/AI6 are GitHub-only with respect to the owner's machine; they may use their own isolated execution environments and authorized repository CI for title-free synthetic work, never remote-control, mount, inspect, or run commands on the owner's computer, directly or through another agent. Request sanitized evidence through #27; AI4 independently performs only currently authorized local tasks. No new local test authorization.
+Owner clarification (D23): AI4 is the only agent permitted access to the owner's computer, local files, local shell, local runtime and game installation. AI0/AI1/AI2/AI3/AI5/AI6 are GitHub-only with respect to the owner's machine; they may use their own isolated execution environments and authorized repository CI for title-free synthetic work, never remote-control, mount, inspect, or run commands on the owner's computer, directly or through another agent. Request sanitized evidence through #27; AI4 independently performs only currently authorized local tasks. No new local test authorization.
+
+AI0 is not part of the main six-agent rotation. Start AI0 only for an owner-confirmed separate work window, recover #55, and submit every contribution for mandatory AI1 review and AI4 validation if required. Return to the main team after AI0 checkpoints and stops. No owner-machine access for AI0.
