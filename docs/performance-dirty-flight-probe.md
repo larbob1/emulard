@@ -94,3 +94,35 @@ Seven additional regression cases (22 total) cover word/page crossings,
 invalid/unknown spans, identity/coverage/capacity, high-address clipping,
 false negatives and false positives, missing/unrelated scan evidence, and
 a deterministic page-intersection oracle. No actual transfer reduction.
+
+## Multi-backing observation and bounded readback lifecycle (CPU-only)
+
+A multi-region comparison accepts up to 64 distinct opaque backing identities
+and 4096 aggregate pages, one immutable region per backing. Aliases must
+already have been resolved by the real mapping owner. Reject duplicate
+backing identities instead of attempting incomplete coalescing. Unknown or
+out-of-range writes invalidate the whole plan. Completed scan evidence must
+cover every region exactly once, match the flight and fence and carry the
+same region and backing. Missing scan is not empty scan; bound input to
+65536 changed spans. Consumed comparison returns Matched, Missed or
+Ineligible; any missed page rejects Match. No result authorizes skipping
+transfers. Same numerical offsets in different backings are independent.
+
+The readback slot model (probes/readback_slots.rs) has at most 64 fixed
+capacity slots under a checked aggregate byte budget. Reserve best fit,
+return Full immediately if unavailable; caller retains baseline fallback
+and must not wait under mapping locks. Lease identity is distinct from slot
+index, preventing old leases from operating on reused slots. State order:
+Reserved -> InFlight -> Complete -> Copied -> Published -> Signaled ->
+retired. Completion checks the same fence domain and rejects device loss.
+Only proven no-effect submission failure or unused reservation may cancel;
+unknown outcomes and unwind quarantine before retry and retain the pin.
+Copy and publication represent actual readback mutations and complete
+alias/generation visibility; title signals are logical ordered milestones,
+not permission to reorder existing runtime signals. No real GPU allocation,
+readback scheduling, synchronization or drop-safe failure retention yet.
+Pool teardown/device-loss reconciliation and cross-flight ordering require
+an external owner; never drop an active pool as a cancellation strategy.
+
+Five new multi-backing cases (27 dirty-flight total) and six readback-slot
+cases run in synthetic CI via Python discovery. No prepared runtime changes.

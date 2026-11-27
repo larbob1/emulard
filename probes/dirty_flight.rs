@@ -303,6 +303,102 @@ impl Marker {
     }
 }
 
+/// Observation-only plan, one declared region per stable backing.
+/// Distinct backings may use identical numeric offsets; duplicates are
+/// conservatively rejected rather than guessing how aliases overlap.
+const MAX_REGIONS: usize = 64;
+const MAX_SCAN_SPANS: usize = 65536;
+
+pub struct MultiMarker {
+    ticket: Ticket,
+    fence: u64,
+    markers: Vec<Marker>,
+    invalid: bool,
+}
+
+pub struct CompletedScan<'a> {
+    pub ticket: Ticket,
+    pub fence: u64,
+    pub backing: &'a Backing,
+    pub region: Span,
+    /// Externally established complete authoritative scan, not partial data.
+    pub changed: Option<&'a [Span]>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Comparison {
+    Ineligible,
+    Missed(Observation),
+    Matched(Observation),
+}
+
+impl MultiMarker {
+    pub fn new<T>(flight: &Flight<T>, regions: &[(Backing, Span)]) -> Result<Self, MarkError> {
+        if regions.is_empty() || regions.len() > MAX_REGIONS { return Err(MarkError::Capacity); }
+        let mut total = 0;
+        let mut markers: Vec<Marker> = Vec::new();
+        for (backing, region) in regions {
+            if markers.iter().any(|m| Arc::ptr_eq(&m.backing.0, &backing.0)) {
+                return Err(MarkError::WrongBacking);
+            }
+            total += region.pages();
+            if total > MAX_PAGES { return Err(MarkError::Capacity); }
+            markers.push(Marker {
+                ticket: flight.ticket(), fence: flight.fence, backing: backing.clone(),
+                region: *region, words: vec![0; region.pages().div_ceil(64) as usize], invalid: false,
+            });
+        }
+        Ok(Self { ticket: flight.ticket(), fence: flight.fence, markers, invalid: false })
+    }
+
+    pub fn mark(&mut self, backing: &Backing, start: u64, len: u64) -> Result<(), MarkError> {
+        if self.invalid { return Err(MarkError::Invalidated); }
+        let result = self.markers.iter_mut().find(|m| Arc::ptr_eq(&m.backing.0, &backing.0))
+            .ok_or(MarkError::WrongBacking).and_then(|m| m.mark(backing, start, len));
+        if result.is_err() { self.invalid = true; }
+        result
+    }
+
+    pub fn unknown(&mut self) { self.invalid = true; }
+
+    /// Consumes this plan: no repeated comparison can replace a missed result.
+    /// Matched is observational evidence only, never permission to skip.
+    pub fn compare<T>(
+        self, flight: &Flight<T>, domain: &FenceDomain, completed: u64,
+        coverage: Coverage, scans: &[CompletedScan<'_>],
+    ) -> Comparison {
+        if self.invalid || !coverage.complete() || !self.ticket.matches(&flight.ticket)
+            || self.fence != flight.fence || !flight.domain.matches(domain)
+            || completed < self.fence || completed == u64::MAX || scans.len() != self.markers.len()
+        { return Comparison::Ineligible; }
+        let mut seen = vec![false; self.markers.len()];
+        let mut count = 0usize;
+        let mut total = Observation { candidate_pages: 0, changed_pages: 0, missed_pages: 0, extra_pages: 0 };
+        for scan in scans {
+            if !scan.ticket.matches(&self.ticket) || scan.fence != self.fence {
+                return Comparison::Ineligible;
+            }
+            let Some(i) = self.markers.iter().position(|m| Arc::ptr_eq(&m.backing.0, &scan.backing.0))
+            else { return Comparison::Ineligible; };
+            let m = &self.markers[i];
+            if seen[i] || scan.region != m.region { return Comparison::Ineligible; }
+            let Some(changed) = scan.changed else { return Comparison::Ineligible; };
+            let Some(next) = count.checked_add(changed.len()) else { return Comparison::Ineligible; };
+            if next > MAX_SCAN_SPANS { return Comparison::Ineligible; }
+            count = next;
+            seen[i] = true;
+            let Some(obs) = m.observe(flight, domain, completed, scan.backing, coverage, Some(changed))
+            else { return Comparison::Ineligible; };
+            total.candidate_pages += obs.candidate_pages;
+            total.changed_pages += obs.changed_pages;
+            total.missed_pages += obs.missed_pages;
+            total.extra_pages += obs.extra_pages;
+        }
+        if !seen.iter().all(|&x| x) { return Comparison::Ineligible; }
+        if total.missed_pages != 0 { Comparison::Missed(total) } else { Comparison::Matched(total) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,6 +750,94 @@ mod tests {
                 assert_eq!((r.words[i/64] >> (i%64)) & 1 != 0, want);
             }
         }
+    }
+
+    fn scan<'a>(f: &Flight<()>, backing: &'a Backing, region: Span, changed: Option<&'a [Span]>) -> CompletedScan<'a> {
+        CompletedScan { ticket: f.ticket(), fence: f.fence, backing, region, changed }
+    }
+
+    #[test]
+    fn multi_backing_counts_same_offsets_independently() {
+        let f = flight(0, PAGE);
+        let a = Backing::new();
+        let b = Backing::new();
+        let region = Span::new(0, PAGE*2).unwrap();
+        let regions = [(a.clone(), region), (b.clone(), region)];
+        let mut m = MultiMarker::new(&f, &regions).unwrap();
+        m.mark(&a, 0, 1).unwrap();
+        m.mark(&b, PAGE, 1).unwrap();
+        let changed_a = [Span::new(0, 1).unwrap()];
+        let changed_b = [Span::new(PAGE, 1).unwrap()];
+        let scans = [scan(&f, &b, region, Some(&changed_b)), scan(&f, &a, region, Some(&changed_a))];
+        assert_eq!(m.compare(&f, &f.domain, 7, coverage(), &scans),
+            Comparison::Matched(Observation { candidate_pages: 2, changed_pages: 2, missed_pages: 0, extra_pages: 0 }));
+    }
+
+    #[test]
+    fn multi_backing_any_missed_page_rejects_match() {
+        let f = flight(0, PAGE);
+        let a = Backing::new();
+        let b = Backing::new();
+        let region = Span::new(0, PAGE*2).unwrap();
+        let mut m = MultiMarker::new(&f, &[(a.clone(), region), (b.clone(), region)]).unwrap();
+        m.mark(&a, 0, PAGE*2).unwrap();
+        let changed = [Span::new(0, 1).unwrap()];
+        let scans = [scan(&f, &a, region, Some(&[])), scan(&f, &b, region, Some(&changed))];
+        assert_eq!(m.compare(&f, &f.domain, 7, coverage(), &scans),
+            Comparison::Missed(Observation { candidate_pages: 2, changed_pages: 1, missed_pages: 1, extra_pages: 2 }));
+    }
+
+    #[test]
+    fn multi_backing_requires_exact_complete_scan_set() {
+        let f = flight(0, PAGE);
+        let other = flight(0, PAGE);
+        let a = Backing::new();
+        let b = Backing::new();
+        let c = Backing::new();
+        let region = Span::new(0, PAGE).unwrap();
+        let regions = [(a.clone(), region), (b.clone(), region)];
+        for scans in [
+            vec![scan(&f, &a, region, Some(&[]))],
+            vec![scan(&f, &a, region, Some(&[])), scan(&f, &a, region, Some(&[]))],
+            vec![scan(&f, &a, region, Some(&[])), scan(&f, &c, region, Some(&[]))],
+            vec![scan(&f, &a, region, Some(&[])), scan(&f, &b, region, None)],
+            vec![scan(&f, &a, region, Some(&[])), scan(&other, &b, region, Some(&[]))],
+            vec![scan(&f, &a, region, Some(&[])), scan(&f, &b, Span::new(1,PAGE-1).unwrap(), Some(&[]))],
+        ] {
+            assert_eq!(MultiMarker::new(&f, &regions).unwrap().compare(&f, &f.domain, 7, coverage(), &scans),
+                Comparison::Ineligible);
+        }
+    }
+
+    #[test]
+    fn multi_backing_unknown_write_invalidates_entire_plan() {
+        let f = flight(0, PAGE);
+        let a = Backing::new();
+        let b = Backing::new();
+        let region = Span::new(0, PAGE).unwrap();
+        let regions = [(a.clone(), region), (b.clone(), region)];
+        let scans = [scan(&f, &a, region, Some(&[])), scan(&f, &b, region, Some(&[]))];
+        let mut m = MultiMarker::new(&f, &regions).unwrap();
+        assert_eq!(m.mark(&a, PAGE-1, 2), Err(MarkError::OutsideRegion));
+        assert_eq!(m.mark(&b, 0, 1), Err(MarkError::Invalidated));
+        assert_eq!(m.compare(&f, &f.domain, 7, coverage(), &scans), Comparison::Ineligible);
+        let mut m = MultiMarker::new(&f, &regions).unwrap();
+        m.unknown();
+        assert_eq!(m.compare(&f, &f.domain, 7, coverage(), &scans), Comparison::Ineligible);
+    }
+
+    #[test]
+    fn multi_backing_bounds_aggregate_and_rejects_duplicates() {
+        let f = flight(0, PAGE);
+        let a = Backing::new();
+        let region = Span::new(0, PAGE).unwrap();
+        assert!(matches!(MultiMarker::new(&f, &[(a.clone(), region), (a.clone(), region)]), Err(MarkError::WrongBacking)));
+        assert!(matches!(MultiMarker::new(&f, &[(a.clone(), Span::new(0, MAX_PAGES*PAGE).unwrap()), (Backing::new(), region)]), Err(MarkError::Capacity)));
+        let many: Vec<_> = (0..=MAX_REGIONS).map(|_| (Backing::new(), region)).collect();
+        assert!(matches!(MultiMarker::new(&f, &many), Err(MarkError::Capacity)));
+        let too_many = vec![Span::new(0, 1).unwrap(); MAX_SCAN_SPANS+1];
+        let scans = [scan(&f, &a, region, Some(&too_many))];
+        assert_eq!(MultiMarker::new(&f, &[(a.clone(), region)]).unwrap().compare(&f, &f.domain, 7, coverage(), &scans), Comparison::Ineligible);
     }
 
     #[test]

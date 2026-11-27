@@ -17,4 +17,4 @@ class DirtyFlightTests(unittest.TestCase):
                            check=True, capture_output=True, text=True)
             result = subprocess.run([str(binary)], check=True, capture_output=True,
                                     text=True, timeout=60)
-            self.assertIn("22 passed; 0 failed", result.stdout)
+            self.assertIn("27 passed; 0 failed", result.stdout)
