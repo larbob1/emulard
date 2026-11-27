@@ -286,6 +286,7 @@ struct Controller {
     queue_cap: usize,
     stop: AtomicU8,
     admission: AtomicU64,
+    pending_hint: AtomicU64,
     state: Mutex<SharedCapture>,
 }
 
@@ -320,6 +321,7 @@ impl Controller {
             queue_cap: queue_cap.clamp(1, 8),
             stop: AtomicU8::new(if enabled && session == 0 { EXHAUSTED } else { RUNNING }),
             admission: AtomicU64::new(if enabled && session == 0 { CLOSED } else { 0 }),
+            pending_hint: AtomicU64::new(0),
             state: Mutex::new(SharedCapture {
                 buffer: Buffer::new(span_cap), epoch: 1, present: None,
                 pending: VecDeque::new(), attempted: 0, drained: 0,
@@ -436,6 +438,7 @@ impl Controller {
                 return;
             }
             state.pending.push_back(row);
+            self.pending_hint.store(state.pending.len() as u64, Ordering::Release);
             if state.attempted >= self.cap {
                 self.fail(CAP_REACHED);
             }
@@ -444,11 +447,15 @@ impl Controller {
 
     // Single writer lease; no further pop before write/flush acknowledgement.
     fn pop(&self) -> Option<Capture> {
+        // Empty polling must not contend with active producers. This is
+        // only a hint; all queue decisions still occur under the mutex.
+        if self.pending_hint.load(Ordering::Acquire) == 0 { return None; }
         let mut state = self.state.try_lock().ok()?;
         if state.writer_inflight.is_some() || self.stop.load(Ordering::Acquire) == WRITER_FAILED {
             return None;
         }
         let row = state.pending.pop_front()?;
+        self.pending_hint.store(state.pending.len() as u64, Ordering::Release);
         state.drained += 1;
         state.writer_inflight = Some(row.sequence);
         Some(row)
@@ -473,6 +480,8 @@ impl Controller {
     }
 
     fn terminal(&self) -> Option<Terminal> {
+        // No need to inspect terminal state before producer quiescence.
+        if self.admission.load(Ordering::Acquire) != CLOSED { return None; }
         let state = self.state.try_lock().ok()?;
         // Closed admission plus zero active operations ensures a producer
         // that observed RUNNING earlier cannot publish a later fault.
@@ -720,5 +729,51 @@ mod controller_tests {
         }
         assert!(c.terminal().unwrap().complete);
         assert_eq!(c.terminal().unwrap().written, 600);
+    }
+
+    #[test]
+    fn pending_hint_tracks_authoritative_queue() {
+        let c = Controller::new(true, 3, 2, 8);
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 0);
+        present(&c, 1, 10);
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 0);
+        present(&c, 19, 20);
+        present(&c, 29, 30);
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 2);
+        let row = c.pop().unwrap();
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 1);
+        assert!(c.pop().is_none());
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 1);
+        c.acknowledge(row.sequence, true);
+        drain(&c).unwrap();
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 0);
+        present(&c, 39, 40);
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 1);
+        assert!(c.terminal().is_none());
+        drain(&c).unwrap();
+        assert_eq!(c.pending_hint.load(Ordering::Acquire), 0);
+        assert!(c.terminal().unwrap().complete);
+    }
+
+    #[test]
+    fn empty_writer_poll_with_locked_state_is_harmless() {
+        let c = Controller::new(true, 2, 2, 8);
+        present(&c, 1, 10);
+        let guard = c.state.lock().unwrap();
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                for _ in 0..1000 {
+                    assert!(c.pop().is_none());
+                    assert!(c.terminal().is_none());
+                }
+            }).join().unwrap();
+        });
+        drop(guard);
+        assert!(c.observing());
+        present(&c, 19, 20);
+        present(&c, 29, 30);
+        drain(&c).unwrap();
+        drain(&c).unwrap();
+        assert!(c.terminal().unwrap().complete);
     }
 }

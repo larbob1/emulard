@@ -231,3 +231,31 @@ registration after all paired-wave patchers and before git diff --check; use
 preview against exact frozen #18, apply only on unique approved candidate after
 review, then validate both profiles and nonempty CPU trace tests. No changes to
 #18, scheduling, legacy counters or any other agent's source.
+
+## Idle-writer contention review follow-up
+
+The e029744d preview against fully prepared #18 passed coordinator CI
+45945524510; that immutable review reference remains unchanged. In this
+portable-only follow-up, avoid locking the shared capture state on every
+empty writer poll: an atomic pending-count hint is updated with the queue
+under its mutex, and terminal queries check closed/quiescent admission before
+trying the mutex. A stale zero can defer consumption until the next poll,
+never certify a missing row; queue and terminal checks remain authoritative
+under the lock. Polling interval unchanged. Writer pop/ack when data exists
+can still contend with the producer and stop capture; no claim of capture
+success rate, latency or FPS improvement. Tests check hint transitions and
+locked-state empty polling, not empirical contention frequency. Repeat the
+prepared preview for this revised module if selected; no actual registration.
+
+Pinned caller audit: queue vtable execute/present directly use outer wrappers;
+execute_x delegates once to execute, host-internal execute/present methods are
+separate and not measured. frame::wait's next_tick clock guard is released
+before either sleep. run startup hook before spawn_main follows loader setup;
+HLE diagnostics feature already propagates GPU diagnostics. These are local
+lexical/call-path observations, not proof of no externally held title locks,
+reentrant callbacks or all prepared call paths. Full native compile, context
+review, and disabled/enabled smoke checks remain separate gates. Zero-duration
+clock observations and nested/overlapping spans are deliberately rejected by
+the existing fail-closed model. Trace boundaries refer to present_now return,
+before existing frame logging and fence pacing, not display completion or the
+outer ABI return. No shared builder modifications made.
