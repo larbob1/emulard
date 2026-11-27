@@ -29,7 +29,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-storage-codec-native' || github.head_ref == 'dev/performance-phase6-storage-codec-native'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-storage-codec-native' || github.head_ref == 'dev/performance-phase6-storage-codec-native' || github.ref == 'refs/heads/dev/performance-phase6-storage-early-drop-native' || github.head_ref == 'dev/performance-phase6-storage-early-drop-native'
     steps:
       - uses: actions/checkout@v4
         with:

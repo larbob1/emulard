@@ -39,7 +39,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     if ignored:
-        if package != "victory-hle" or suite not in ("storage_codec_native_chain_address", "storage_codec_native_chain_pages", "storage_codec_native_partial_error") or expected != 1:
+        if package != "victory-hle" or suite not in ("tests::storage_codec_native_chain_address", "tests::storage_codec_native_chain_pages", "tests::storage_codec_native_partial_error", "early_drop_off::storage_codec_native_chain_address", "early_drop_off::storage_codec_native_chain_pages", "early_drop_off::storage_codec_native_partial_error", "early_drop_on::storage_codec_native_chain_address", "early_drop_on::storage_codec_native_chain_pages", "early_drop_on::storage_codec_native_partial_error") or expected != 1:
             raise ValueError("ignored storage codec fixture requires exact count-one gate")
         command.extend(["--", "--ignored", "--test-threads=1"])
     print(f"Running runtime test: {package} {suite}", flush=True)
@@ -96,9 +96,15 @@ def validate_paired(target, *, keep_going=False):
     suite("victory-hle", "zlib_then_bcpack", expected=1)
     suite("victory-hle", "zlib_into_pages_in_place_and_across_allocations", expected=1)
     suite("victory-hle", "zlib_inflate_handles_short_exact_empty_and_bad_streams", expected=1)
-    suite("victory-hle", "storage_codec_native_chain_address", expected=1, ignored=True)
-    suite("victory-hle", "storage_codec_native_chain_pages", expected=1, ignored=True)
-    suite("victory-hle", "storage_codec_native_partial_error", expected=1, ignored=True)
+    suite("victory-hle", "tests::storage_codec_native_chain_address", expected=1, ignored=True)
+    suite("victory-hle", "tests::storage_codec_native_chain_pages", expected=1, ignored=True)
+    suite("victory-hle", "tests::storage_codec_native_partial_error", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_off::storage_codec_native_chain_address", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_off::storage_codec_native_chain_pages", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_off::storage_codec_native_partial_error", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_on::storage_codec_native_chain_address", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_on::storage_codec_native_chain_pages", expected=1, ignored=True)
+    suite("victory-hle", "early_drop_on::storage_codec_native_partial_error", expected=1, ignored=True)
     suite("victory-gpu", "mapping_tests")
     suite("victory-gpu", "perf_hotpath_coverage_tests")
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
@@ -173,7 +179,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_preflight.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
-            run([sys.executable, str(PATCHER.with_name("test_storage_codec_native.py")), "--checkout", str(target), "--apply"])
+            run([sys.executable, str(PATCHER.with_name("test_storage_early_drop_composition.py")), "--checkout", str(target), "--apply"])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
