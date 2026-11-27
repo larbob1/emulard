@@ -49,10 +49,12 @@ def summarize(lines):
             starts = list(re.finditer(r"(?<!\S)" + re.escape(marker), line))
             if not starts:
                 continue
-            # Avoid mistaking the suffix of "video memory:" for "memory:".
-            if name == "memory" and len(starts) == 1:
-                tail = line[starts[0].start():]
-                if not re.match(r"memory:\s+\S+\s+MB private", tail):
+            # The primary line itself contains "title memory:" later;
+            # distinguish the leading private-memory signature before counting.
+            if name == "memory":
+                starts = [m for m in starts if re.match(
+                    r"memory:\s+\S+\s+MB private", line[m.start():])]
+                if not starts:
                     continue
             row = groups[name]
             match = pattern.fullmatch(line[starts[0].start():]) if len(starts) == 1 else None
