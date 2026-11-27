@@ -42,6 +42,22 @@ class ShaderBuildMemoTests(unittest.TestCase):
         self.assertNotIn("emit::translate(", fixture)
         self.assertIn('#[ignore = "fresh process;', source)
 
+    def test_actual_build_measurement_wiring(self):
+        source = postimage()
+        fixture = source.split("fn shader_build_memo_measurement()", 1)[1].split(
+            "fn oversized_fingerprint_is_not_retained()", 1)[0]
+        self.assertIn("const CALLS: usize = 2048", fixture)
+        self.assertIn("for repeat in 0..4", fixture)
+        self.assertIn("for churn in [repeat % 2 == 1, repeat % 2 == 0]", fixture)
+        self.assertIn("BUILD_MEMO.with(|m| m.borrow_mut().last = None)", fixture)
+        self.assertIn("results.push(black_box(build()))", fixture)
+        self.assertIn("assert_eq!(key, if churn && i % 2 == 0 { b } else { a })", fixture)
+        self.assertIn("if repeat != 0", fixture)
+        self.assertIn("elapsed_ns={}", fixture)
+        self.assertNotIn("emit::translate(", fixture)
+        self.assertNotIn("set_var(", fixture)
+        self.assertIn('#[ignore = "isolated release-mode build digest measurement"]', source)
+
     @unittest.skipUnless(shutil.which("rustc"), "Rust compiler unavailable")
     def test_extracted_memo_logic(self):
         source = postimage().split("const BUILD_MEMO_MAX:", 1)[1].split("thread_local!", 1)[0]
