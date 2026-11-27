@@ -1,8 +1,8 @@
 name: AI1 isolated first-slice native validation
 
 on:
-  push:
-    branches: [dev/performance-phase6-ai1-compare-first-slice-validation]
+  pull_request:
+    branches: [dev/performance-phase6]
     paths:
       - 'tools/validate_ai1_compare_first_slice.py'
       - 'tools/test_validate_ai1_compare_first_slice.py'
@@ -13,12 +13,20 @@ permissions:
 
 jobs:
   isolated-first-slice:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-compare-first-slice-validation'
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
