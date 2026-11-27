@@ -57,6 +57,19 @@ class StorageReportTests(unittest.TestCase):
         self.assertFalse(summarize_storage(malformed_config + [good])
                          ["worker_configuration_verified"])
 
+    def test_truncated_window_marker_is_counted(self):
+        lines = configuration() + ["private dstorage: last",
+                                   window(), "private dstorage: last\n",
+                                   "private dstorage: latest unrelated",
+                                   window()]
+        result = summarize_storage(lines, skip=1)
+        self.assertEqual(result["windows_seen"], 4)
+        self.assertEqual(result["windows_skipped"], 1)
+        self.assertEqual(result["windows_invalid_after_warmup"], 1)
+        self.assertEqual(result["windows_used"], 2)
+        self.assertFalse(compare_storage(result, result)["comparison_usable"])
+        self.assertNotIn("private", json.dumps(result))
+
     def test_numeric_limits_refuse_without_losing_valid_rows(self):
         good = window()
         bad = [good.replace("requests=10", "requests=" + str(2**64)),

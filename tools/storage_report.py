@@ -59,13 +59,16 @@ def summarize_storage(lines, skip=0):
                            if workers is not None and default is not None and 0 < workers <= default else None)
         elif "dstorage: workers" in line:
             started.append(numeric_field(line, "workers", True))
-        if "dstorage: last " not in line:
+        # Recognize a truncated marker even when the separating space
+        # or all subsequent fields were lost. Use the same marker for
+        # warmup accounting and validation.
+        markers = list(WINDOW_MARKER.finditer(line))
+        if not markers:
             continue
         seen += 1
         if seen <= skip:
             skipped += 1
             continue
-        markers = list(WINDOW_MARKER.finditer(line))
         match = WINDOW.match(line, markers[0].start()) if len(markers) == 1 else None
         seconds = parse_number(match[1]) if match else None
         row = {key: numeric_field(line, key, key in INT_FIELDS)
