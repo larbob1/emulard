@@ -61,3 +61,5 @@ AI4 #27 assigned local evidence collection, with read-only title isolation, supe
 #32 review-only short-lock publication proposal; prepared anchors passed. Do not enable or register until AI2 staging/lock/fence review and native race tests. Continue #18 actual rendering validation and native #26/#29/#30; AI2 threaded retry snapshot after current jobs. No new gameplay evidence.
 
 #26 native passed; #33 isolated native CPU trace staged and synthetic passed, native pending. B003 exact #18 reached first cutscene but stopped safely for low available RAM; no gameplay acceptance. Next offline memory/pipeline/remap phase analysis, native #29/#30/#33, review bounded safe local test plan. No new gameplay performance claim.
+
+B003 offline evidence narrows host-copy windows/retention; request existing ownership/coverage values, hold further runs. #29 native passed; #34 isolated scatter composition portable passed, native and synthetic regression pending at check. Next investigate descriptor/heap/inflight retention and safe bounded plan after evidence, check #30/#33/#34 native. No verified gameplay.
