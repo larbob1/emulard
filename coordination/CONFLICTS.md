@@ -15,3 +15,5 @@ Post conflict in your issue with P-ID, paths/symbols, competing claim, proposed 
 - AI4 #27 collects local evidence; AI3 retains reporting schema/acceptance authority. No production changes by AI4 without a new coordinator claim. Read-only title protection mandatory; no raw logs or private paths in GitHub.
 
 - P11 #32 review-only guard proposal: AI1 retains mapping lock contract; AI2 reviews actual staging upload/refresh/submission/fence ownership. No production application before agreement and native race validation. Existing short-lock flag remains off for #18 control.
+
+- P03 #33 native-only registration isolated; AI3 reporting ownership unchanged. P15/P17/P22 offline memory/pipeline triage coordinated with AI4; no production budget or staging changes without ownership/retirement proof. Dirty observation logging outside presenter guard requires review.
