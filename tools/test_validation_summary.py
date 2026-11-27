@@ -55,5 +55,17 @@ class ValidationSummaryTests(unittest.TestCase):
             "passed: victory-hle mapping_diagnostic_actual_views [VICTORY_MAPPING_DIAGNOSTIC=1] [passed=1 failed=0]",
         ])
 
+    def test_reverse_anomaly_mode_proofs(self):
+        lines, expected = [], []
+        for name in ("mapping_diagnostic_missing_reverse_key", "mapping_diagnostic_missing_reverse_address", "mapping_diagnostic_duplicate_reverse_address"):
+            label = ("victory-hle " + name).encode("ascii")
+            for mode in (b"0", b"1"):
+                lines.extend([b"Running runtime test: " + label + b"\n",
+                              b"Runtime test switches: VICTORY_MAPPING_DIAGNOSTIC=" + mode + b"\n",
+                              b"Runtime test counts: " + label + b" passed=1 failed=0\n",
+                              b"Runtime validation passed: " + label + b"\n"])
+                expected.append("passed: victory-hle " + name + " [VICTORY_MAPPING_DIAGNOSTIC=" + mode.decode() + "] [passed=1 failed=0]")
+        self.assertEqual(validation_summary(lines), expected)
+
 if __name__ == "__main__":
     unittest.main()

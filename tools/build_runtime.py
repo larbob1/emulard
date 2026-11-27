@@ -39,7 +39,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     if ignored:
-        if package != "victory-hle" or suite != "mapping_diagnostic_actual_views" or not diagnostics or expected != 1 or env is None or env.get("VICTORY_MAPPING_DIAGNOSTIC") not in ("0", "1"):
+        if package != "victory-hle" or suite not in ("mapping_diagnostic_actual_views", "mapping_diagnostic_missing_reverse_key", "mapping_diagnostic_missing_reverse_address", "mapping_diagnostic_duplicate_reverse_address") or not diagnostics or expected != 1 or env is None or env.get("VICTORY_MAPPING_DIAGNOSTIC") not in ("0", "1"):
             raise ValueError("ignored mapping diagnostic fixture requires explicit mode and count-one gate")
         command.extend(["--", "--ignored", "--test-threads=1"])
     print(f"Running runtime test: {package} {suite}", flush=True)
@@ -120,7 +120,8 @@ def validate_paired(target, *, keep_going=False):
     suite("victory-gpu", "compositor", diagnostics=True)
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAPPING_DIAGNOSTIC=mode, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="0", VICTORY_MAP_RUNS="0", VICTORY_MAP_EXACT_PLACEHOLDERS="0")
-        suite("victory-hle", "mapping_diagnostic_actual_views", env=env, diagnostics=True, expected=1, ignored=True)
+        for name in ("mapping_diagnostic_actual_views", "mapping_diagnostic_missing_reverse_key", "mapping_diagnostic_missing_reverse_address", "mapping_diagnostic_duplicate_reverse_address"):
+            suite("victory-hle", name, env=env, diagnostics=True, expected=1, ignored=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:
