@@ -308,7 +308,46 @@
      )
  }
  
-@@ -885,6 +928,147 @@
+@@ -885,6 +928,186 @@
++    #[cfg(windows)]
++    #[test]
++    fn pipeline_stream_rejects_invalid_input_offsets_and_target_count() {
++        use windows::Win32::Graphics::Direct3D12::D3D12_INPUT_ELEMENT_DESC;
++        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R32_FLOAT;
++        let element = |slot, offset| D3D12_INPUT_ELEMENT_DESC {
++            SemanticName: windows::core::PCSTR(b"POSITION\0".as_ptr()),
++            Format: DXGI_FORMAT_R32_FLOAT,
++            InputSlot: slot,
++            AlignedByteOffset: offset,
++            ..Default::default()
++        };
++        let invalid = [
++            [element(32, 0), element(0, 0)],
++            [element(0, u32::MAX - 1), element(0, 0)],
++            [element(0, u32::MAX - 4), element(0, u32::MAX)],
++        ];
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&12u32.to_le_bytes());
++        bytes[16..20].copy_from_slice(&2u32.to_le_bytes());
++        for elements in &invalid {
++            bytes[8..16].copy_from_slice(&(elements.as_ptr() as u64).to_le_bytes());
++            assert_eq!(stream_result(&bytes, 24), (E_INVALIDARG, std::ptr::null()));
++        }
++        let valid = [element(31, 0), element(31, u32::MAX)];
++        bytes[8..16].copy_from_slice(&(valid.as_ptr() as u64).to_le_bytes());
++        let (hr, p) = stream_result(&bytes, 24);
++        assert_eq!(hr, S_OK);
++        assert_eq!(release(p), 0);
++        let mut targets = [0u8; 40];
++        targets[..4].copy_from_slice(&15u32.to_le_bytes());
++        targets[36..40].copy_from_slice(&9u32.to_le_bytes());
++        assert_eq!(stream_result(&targets, 40), (E_INVALIDARG, std::ptr::null()));
++        targets[36..40].copy_from_slice(&8u32.to_le_bytes());
++        let (hr, p) = stream_result(&targets, 40);
++        assert_eq!(hr, S_OK);
++        assert_eq!(release(p), 0);
++    }
++
 +    #[cfg(windows)]
 +    #[test]
 +    fn pipeline_stream_rejects_invalid_nested_input_layout() {
@@ -458,7 +497,7 @@
      fn streams_yield_their_shaders() {
 --- a/crates/victory-gpu/src/pipeline/host.rs
 +++ b/crates/victory-gpu/src/pipeline/host.rs
-@@ -92,85 +92,107 @@
+@@ -92,85 +92,130 @@
  }
  
 -impl GraphicsState {
@@ -554,6 +593,18 @@
 +            bytes <= isize::MAX as usize && start.checked_add(bytes).is_some())
 +}
 +
++// Match GraphicsState::elements' existing append and byte-width rules.
++fn input_offsets_valid(elements: impl IntoIterator<Item = (u32, u32, u32)>) -> bool {
++    let mut next = [0u32; 32];
++    for (slot, offset, bytes) in elements {
++        let Some(end) = next.get_mut(slot as usize) else { return false; };
++        let offset = if offset == u32::MAX { *end } else { offset };
++        let Some(after) = offset.checked_add(bytes) else { return false; };
++        *end = after;
++    }
++    true
++}
++
 +impl GraphicsState {
 +    /// Takes in one subobject of a stream: its type, then its data at +4
 +    /// (+8 for those holding pointers).
@@ -605,6 +656,13 @@
 +                    if elements.iter().any(|e| e.SemanticName.0.is_null()) {
 +                        return false;
 +                    }
++                    if !input_offsets_valid(elements.iter().map(|e| {
++                        let format = crate::resource::pc_format(e.Format.0 as u32);
++                        let bytes = crate::resource::element(format).map_or(0, |(b, _)| b as u32);
++                        (e.InputSlot, e.AlignedByteOffset, bytes)
++                    })) {
++                        return false;
++                    }
 +                    self.names = elements
 +                        .iter()
 +                        .map(|e| CStr::from_ptr(e.SemanticName.0.cast()).to_owned())
@@ -630,7 +688,11 @@
 +                        D3D12_PRIMITIVE_TOPOLOGY_TYPE(data.cast::<i32>().read_unaligned())
 +                }
 +                15 => {
-+                    self.targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
++                    let targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
++                    if targets.NumRenderTargets as usize > targets.RTFormats.len() {
++                        return false;
++                    }
++                    self.targets = targets;
 +                    for f in &mut self.targets.RTFormats {
 +                        f.0 = crate::resource::target_format(crate::resource::pc_format(
 +                            f.0 as u32,
