@@ -9,7 +9,10 @@ dependency spans or claim an exclusive critical path from them.
 ## Numeric schema v1
 
 One JSON object per line, one frame window from previous present completion to
-current present completion. All timestamps are integer microseconds relative to
+current present completion. Each file is one contiguous capture, with increasing
+consecutive frame IDs and adjacent windows sharing an exact endpoint. A missing
+or out-of-order middle record suppresses the aggregate summary; missing initial
+or trailing records are not detectable. All timestamps are integer microseconds relative to
 one monotonic host clock; GPU spans require measured clock calibration. Use only
 local numeric frame/span IDs, no addresses, title strings or raw GPU identifiers.
 Example (synthetic, not gameplay):
@@ -60,7 +63,7 @@ Exit 0 means supplied records passed structural checks, 1 means unavailable,
 2 means at least one rejected record or no usable frames. Do not upload raw
 traces. Numeric output omits original IDs, paths and arbitrary labels. Output
 keeps each frame's metrics but suppresses the aggregate median if any records
-are rejected; no performance gate is inferred.
+are rejected or frame windows/IDs are discontinuous; no performance gate is inferred.
 
 The analyzer finds the ancestors of the presentation terminal and the longest
 sum of nonoverlapping durations along explicit edges. A longer parallel branch

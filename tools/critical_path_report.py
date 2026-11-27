@@ -31,7 +31,7 @@ def union_length(intervals):
 
 def analyze(frame):
     """A measured dependency-chain lower bound, not a scheduler simulation."""
-    if not isinstance(frame, dict) or frame.get("schema") != 1:
+    if not isinstance(frame, dict) or type(frame.get("schema")) is not int or frame["schema"] != 1:
         raise ValueError("invalid_schema")
     if not integer(frame.get("frame")):
         raise ValueError("invalid_frame_id")
@@ -132,7 +132,8 @@ def summarize(lines):
     results = []
     rejected = Counter()
     frame_ids = set()
-    duplicate = False
+    sequence_issues = Counter()
+    previous_id = previous_end = None
     records = 0
     for line in lines:
         if not line.strip():
@@ -143,10 +144,15 @@ def summarize(lines):
             if isinstance(frame, dict) and integer(frame.get("frame")):
                 fid = frame["frame"]
                 if fid in frame_ids:
-                    duplicate = True
                     rejected["duplicate_frame_id"] += 1
                     continue
                 frame_ids.add(fid)
+                if previous_id is not None and fid != previous_id + 1:
+                    sequence_issues["nonconsecutive_frame_ids"] += 1
+                if previous_end is not None and frame.get("start_us") != previous_end:
+                    sequence_issues["discontinuous_frame_windows"] += 1
+                previous_id = fid
+                previous_end = frame.get("end_us") if integer(frame.get("end_us")) else None
             result = analyze(frame)
         except (ValueError, TypeError, RecursionError) as exc:
             # Only fixed reason codes from this module are exported.
@@ -168,8 +174,9 @@ def summarize(lines):
         "valid_frames": len(results),
         "rejected_frames": sum(rejected.values()),
         "rejection_reasons": dict(sorted(rejected.items())),
-        "all_records_usable": bool(results) and not rejected and not duplicate,
-        "median_measured_chain_us": median(r["longest_measured_dependency_chain_us"] for r in results) if results and not rejected else None,
+        "sequence_issues": dict(sorted(sequence_issues.items())),
+        "all_records_usable": bool(results) and not rejected and not sequence_issues,
+        "median_measured_chain_us": median(r["longest_measured_dependency_chain_us"] for r in results) if results and not rejected and not sequence_issues else None,
         "frames": results,
         "note": "Only explicit nonoverlapping terminal dependencies are analyzed. Chain work is a lower bound under supplied edges, not a fully attributed critical path; gaps may contain unobserved work or waits. Union measures elapsed coverage, not CPU/GPU utilization. Ambiguous equal-length chains have no category attribution. Completeness and calibration are producer assertions, not independently verified. No FPS or visible rendering evidence.",
     }

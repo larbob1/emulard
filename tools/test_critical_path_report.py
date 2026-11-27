@@ -102,6 +102,32 @@ class CriticalPathTests(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(report))
         self.assertNotIn("private", json.dumps(report))
 
+    def test_contiguous_capture_and_missing_frames(self):
+        first = fixture()
+        second = copy.deepcopy(first)
+        second["frame"] += 1
+        for key in ("start_us", "end_us"):
+            second[key] += 100
+            for node in second["spans"]:
+                node[key] += 100
+        def report():
+            return summarize([json.dumps(first), json.dumps(second)])
+        self.assertTrue(report()["all_records_usable"])
+        second["frame"] += 1
+        r = report()
+        self.assertEqual(r["sequence_issues"], {"nonconsecutive_frame_ids": 1})
+        self.assertIsNone(r["median_measured_chain_us"])
+        second["frame"] -= 1
+        second["start_us"] -= 1
+        self.assertEqual(report()["sequence_issues"], {"discontinuous_frame_windows": 1})
+        self.assertFalse(report()["all_records_usable"])
+
+    def test_boolean_schema_rejected(self):
+        f = fixture()
+        f["schema"] = True
+        with self.assertRaisesRegex(ValueError, "invalid_schema"):
+            analyze(f)
+
     def test_union_and_empty(self):
         self.assertEqual(union_length([(0, 10), (2, 3), (10, 20), (25, 30)]), 25)
         self.assertEqual(union_length([]), 0)
