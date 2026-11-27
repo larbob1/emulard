@@ -20,5 +20,5 @@ class GPUPublicationReviewTests(unittest.TestCase):
             result = subprocess.run(
                 [str(exe)], check=True, capture_output=True, text=True, timeout=10,
             )
-            self.assertIn("8 passed; 0 failed; 0 ignored", result.stdout)
-            print("GPU publication review Rust proof: 8 passed; 0 failed; 0 ignored")
+            self.assertIn("14 passed; 0 failed; 0 ignored", result.stdout)
+            print("GPU publication review Rust proof: 14 passed; 0 failed; 0 ignored")
