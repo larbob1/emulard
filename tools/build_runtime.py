@@ -108,6 +108,7 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-gpu", name)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
+    suite("victory-gpu", "cpu_trace::", diagnostics=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:
@@ -165,6 +166,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_exact_placeholders.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_cpu_trace_candidate.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
