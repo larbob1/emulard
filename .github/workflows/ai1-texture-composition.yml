@@ -1,0 +1,47 @@
+name: AI1 isolated texture composition
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_texture_composition.py'
+      - 'probes/ai1_texture_composition.rs'
+      - '.github/workflows/ai1-texture-composition.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  texture-composition:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-texture-composition'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          printf 'candidate_head=%s\n' "$(git rev-parse HEAD)"
+      - uses: actions/checkout@v4
+        with:
+          ref: 1b118a210d02d19686a9389fc30ea723c670bec4
+          path: ai0-pr64
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5af0fa2cbadf311947f0101eefad18b16bcc2f9a
+          path: ai0-pr65
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run debug and optimized combined parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc -vV
+          python tools/validate_ai1_texture_composition.py --pr64 ai0-pr64 --pr65 ai0-pr65
