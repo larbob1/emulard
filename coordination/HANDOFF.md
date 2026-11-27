@@ -63,3 +63,5 @@ AI4 #27 assigned local evidence collection, with read-only title isolation, supe
 #26 native passed; #33 isolated native CPU trace staged and synthetic passed, native pending. B003 exact #18 reached first cutscene but stopped safely for low available RAM; no gameplay acceptance. Next offline memory/pipeline/remap phase analysis, native #29/#30/#33, review bounded safe local test plan. No new gameplay performance claim.
 
 B003 offline evidence narrows host-copy windows/retention; request existing ownership/coverage values, hold further runs. #29 native passed; #34 isolated scatter composition portable passed, native and synthetic regression pending at check. Next investigate descriptor/heap/inflight retention and safe bounded plan after evidence, check #30/#33/#34 native. No verified gameplay.
+
+#30 native passed; #34 synthetic passed, #33/#34 native active. #36 exact #35 preview passed, not release approval. B003 holder evidence requires independent list/slot/fence ownership before cleanup; request actual skipped-refresh/heap-drop/replay fixtures and numeric pipeline library creation failure review. Hold local runs/switches. No new FPS result.
