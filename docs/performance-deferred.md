@@ -85,3 +85,6 @@ P03: detailed present-to-present frame batches now produce independent p50/p90/p
 P06: preflight failures now leave existing aligned diff mappings intact, and range overflow is rejected before mutation. This is not transactional host failure recovery. Existing native map/unmap error paths still require a separate audit and fault injection; no closure claimed.
 
 P21: a separate portable-copy CI job prepares the pinned patched renderer and compiles the exact portable helper functions with rustc on Linux. This can verify pure CPU equivalence and idle-budget tests without compiling D3D12 or claiming gameplay correctness. Results pending.
+
+- [Windows CI 45936505077](https://github.com/larbob1/emulard/actions/runs/45936505077) compiled and ran the first selected HLE test, then failed with a runtime assertion panic in `physical_pages_map_alias_and_unmap`. This is not a release-build success. The assertion location was not included by the earlier sanitized filter; the revised filter records source-relative panic locations, failed test names and the current experiment switches. P01/P24 stay open.
+- [Synthetic CI 45936759570](https://github.com/larbob1/emulard/actions/runs/45936759570) at `4ea21899f6ef644ea1401adcc340bfd8e561b7f3` passed 102 Python and four standalone Rust tests. Runtime mapping tests remain unverified.

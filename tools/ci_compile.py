@@ -29,7 +29,19 @@ def run_stage(label, args, cwd):
             categories = set()
             last_test = None
             empty_tests = set()
+            panic_locations = set()
+            last_switches = None
+            failed_tests = set()
             for line in output:
+                switches = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
+                if switches:
+                    last_switches = switches[1].decode("ascii")
+                panic = re.search(rb"panicked at ((?:crates|apps)[\\/][A-Za-z0-9_\\/.-]+\.rs):([0-9]+):([0-9]+)", line)
+                if panic:
+                    panic_locations.add(b":".join(panic.groups()).replace(b"\\", b"/").decode("ascii"))
+                failure = re.fullmatch(rb"test ([A-Za-z0-9_:]+) \.\.\. FAILED\s*", line)
+                if failure:
+                    failed_tests.add(failure[1].decode("ascii"))
                 test = re.fullmatch(rb"Running runtime test: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
                 if test:
                     last_test = test[1].decode("ascii")
@@ -87,6 +99,12 @@ def run_stage(label, args, cwd):
                             categories.add(category)
             if last_test:
                 print("Last runtime suite attempted: " + last_test)
+            if last_switches:
+                print("Runtime test switches: " + last_switches)
+            if panic_locations:
+                print("Runtime panic locations: " + ", ".join(sorted(panic_locations)))
+            if failed_tests:
+                print("Failed runtime test names: " + ", ".join(sorted(failed_tests)))
             if empty_tests:
                 print("Empty runtime suites: " + ", ".join(sorted(empty_tests)))
             if last_patch:

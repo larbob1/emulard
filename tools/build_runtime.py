@@ -39,10 +39,17 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     print(f"Running runtime test: {package} {suite}", flush=True)
+    switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE")
+    if env is not None:
+        values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
+        print("Runtime test switches: " + values, flush=True)
     result = subprocess.run(command, cwd=target, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace")
     # Keep the compiler output available to local callers. CI filters this
     # output and never republishes source or title data.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     print(result.stdout, end="", flush=True)
     result.check_returncode()
     counts = test_result_counts(result.stdout)
