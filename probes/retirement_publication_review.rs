@@ -11,9 +11,14 @@ struct Ledger {
     retired: Mutex<Vec<(u64, Sentinel)>>,
 }
 
-struct Sentinel(Arc<AtomicU64>);
+struct Sentinel(Arc<AtomicU64>, Option<std::sync::Weak<Ledger>>);
 impl Drop for Sentinel {
-    fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+    fn drop(&mut self) {
+        if let Some(ledger) = self.1.as_ref().and_then(|weak| weak.upgrade()) {
+            assert!(ledger.retired.try_lock().is_ok(), "destructor under retirement lock");
+        }
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
 impl Ledger {
@@ -65,7 +70,7 @@ mod tests {
         std::thread::scope(|scope| {
             let count = drops.clone();
             let state = &ledger;
-            let worker = scope.spawn(move || state.retire(Sentinel(count), recheck, || {
+            let worker = scope.spawn(move || state.retire(Sentinel(count, None), recheck, || {
                 paused.send(()).unwrap();
                 proceed.recv_timeout(WAIT).unwrap();
             }));
@@ -106,7 +111,7 @@ mod tests {
         let drops = Arc::new(AtomicU64::new(0));
         ledger.started.store(2, Ordering::Release);
         for mode in [false, true] {
-            ledger.retire(Sentinel(drops.clone()), mode, || {});
+            ledger.retire(Sentinel(drops.clone(), None), mode, || {});
         }
         ledger.complete(1);
         assert_eq!(drops.load(Ordering::SeqCst), 0);
@@ -118,11 +123,49 @@ mod tests {
     }
 
     #[test]
+    fn queued_before_completion_and_rechecked_after_completion_drop_outside_lock() {
+        let ledger = Arc::new(Ledger::default());
+        let drops = Arc::new(AtomicU64::new(0));
+        let make = || Sentinel(drops.clone(), Some(Arc::downgrade(&ledger)));
+        ledger.started.store(1, Ordering::Release);
+        ledger.retire(make(), true, || {});
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        ledger.complete(1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        ledger.started.store(2, Ordering::Release);
+        ledger.retire(make(), true, || ledger.complete(2));
+        assert_eq!(drops.load(Ordering::SeqCst), 2);
+        ledger.retire(make(), true, || panic!("already completed"));
+        assert_eq!(drops.load(Ordering::SeqCst), 3);
+        assert!(ledger.retired.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn publication_before_drain_is_safe_when_enqueue_interleaves() {
+        let ledger = Ledger::default();
+        let drops = Arc::new(AtomicU64::new(0));
+        ledger.started.store(1, Ordering::Release);
+        // Model completion publishing while the retirement mutex is held,
+        // after the old check and before enqueue. Drain runs only once
+        // the mutex becomes available.
+        {
+            let mut queue = ledger.retired.lock().unwrap();
+            let started = ledger.started.load(Ordering::Acquire);
+            assert!(started > ledger.finished.load(Ordering::Acquire));
+            ledger.finished.store(1, Ordering::Release);
+            queue.push((started, Sentinel(drops.clone(), None)));
+        }
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        ledger.complete(1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn already_complete_never_enters_queue() {
         let ledger = Ledger::default();
         let drops = Arc::new(AtomicU64::new(0));
         for mode in [false, true] {
-            ledger.retire(Sentinel(drops.clone()), mode, || panic!("unexpected slow path"));
+            ledger.retire(Sentinel(drops.clone(), None), mode, || panic!("unexpected slow path"));
         }
         assert_eq!(drops.load(Ordering::SeqCst), 2);
         assert!(ledger.retired.lock().unwrap().is_empty());
