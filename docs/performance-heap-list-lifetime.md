@@ -91,3 +91,47 @@ separate COM identity: each list must hold exactly one explicit stride pin
 reset clears it. This positive control distinguishes a functioning kept
 COM observer from an absence of explicit buffer pins. It does not prove
 all owners or GPU execution safety. No production semantics are changed.
+
+## Retirement publication review (P15/P18; not a runtime patch)
+
+Pinned upstream 51700c6: host.rs::retire captures STARTED, tests FINISHED,
+then locks RETIRED and enqueues. submit, settle and relay_land store
+FINISHED before bury partitions RETIRED under its mutex. A thread paused
+between the first completion test and enqueue may add an already-complete
+entry after the matching drain. The next drain can reclaim it; this is a
+retention ordering gap, not demonstrated title memory growth.
+
+The standalone retirement_publication_review.rs model forces that ordering
+and the converse (enqueue before drain). A possible correction, still
+review-only, rechecks the captured boundary under RETIRED, then releases
+the mutex before destruction. The model assumes the captured submission
+is the last relevant use. Seven cases include a weak-reference sentinel
+that checks destruction outside the retirement mutex, not outside all
+caller locks. The ordering test does not establish real fence-domain
+equivalence or safety of any particular resource.
+
+### Pinned caller inventory (read-only)
+
+- descriptor/host.rs::HostHeap::keep replaces a kept COM reference while
+  holding the slot's kept mutex. Retire can already destroy immediately;
+  the proposed recheck must not add a RETIRED-held destructor or create a
+  new lock order. Mutable slot visibility and independent recording pins
+  remain separate prerequisites.
+- resource.rs::let_go_idle removes a host texture only after existing
+  idle, Arc and COM reference tests; unstage occurs under made's lock.
+  Resource::drop retires the host copy and colour twin, then forgets
+  texture/descriptor records. Neither call proves all recorded users
+  simply by reading a submission count.
+- shadow.rs::let_go_idle removes eligible LOOSE entries under the map
+  mutex and retires after unlocking; in_place_let_go removes overlapping
+  in-place copies from LOOSE and buffer tables before retirement. Preserve
+  alias/backing obligations and all independent Arc/COM owners; do not
+  weaken existing range, mapping or idle checks.
+
+Only these inspected raw pinned callers are covered here; the combined
+prepared postimage and other callers need coordinator review. No new
+resource sweep, reclamation threshold, release flag or actual GPU
+submission is introduced. A production proposal requires AI1/AI3
+agreement, exact prepared source audit, deterministic native ordering
+and independently established recorded/in-flight/replay lifetime and
+completion contracts. No RSS or FPS attribution.
