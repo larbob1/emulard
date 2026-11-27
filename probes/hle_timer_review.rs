@@ -99,10 +99,10 @@ impl Timer {
     }
     fn wait_for_head(&self, deadline: Instant) {
         let s = self.shared.state.lock().unwrap();
-        let (_, timeout) = self.shared.observed.wait_timeout_while(
+        let (guard, timeout) = self.shared.observed.wait_timeout_while(
             s, LIMIT, |s| s.waiting_for != Some(deadline) && !s.closed,
         ).unwrap();
-        assert!(!timeout.timed_out(), "timer did not observe head");
+        assert!(!timeout.timed_out() && guard.waiting_for == Some(deadline) && !guard.closed, "timer did not observe head");
     }
     fn stop(&mut self) {
         {
