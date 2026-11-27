@@ -167,3 +167,40 @@ for synthetic fixtures/structural analysis, explicitly terminal_verified false
 without a receipt. This is count/structure validation, not proof of capture
 provenance, clock accuracy, storage durability or visual FPS. The prototype
 still has no runtime hooks or approved shared registration.
+
+## Exact review-only hook preview and file writer
+
+The unregistered tool tools/propose_cpu_trace_hooks.py accepts a separately
+prepared runtime root and prints a unified diff, never modifies its files.
+Five exact anchors were checked against pinned upstream 51700c6d; the
+prepared cumulative patch stack still requires coordinator verification.
+Review the diff and proposed cpu_trace.rs module (portable model + bridge):
+
+    python3 tools/propose_cpu_trace_hooks.py ../runtime-combined > cpu-hooks-review.diff
+
+No builder registration or prepared source edits in this PR. Proposed module
+registration in lib.rs beside framelog is diagnostics + Windows only. The
+four wrapper replacements are execute/present and both actual sleep branches;
+existing framelog::frame and pacing/return/error behavior unchanged. Existing
+framelog wall timer will include new hook overhead when enabled. The bridge
+reserves a ticket before timestamping, samples end before existing counters,
+and reports HRESULT success via nonnegative result. Disabled path caches
+configuration once and returns before new clocks, capture locks, TLS or
+allocation (environment query once; initial enabled setup may allocate and
+spawn on caller). This is not a proof of zero overhead or absence of all
+caller-held locks; coordinator must review callers and measure off/on.
+
+Proposed opt-in VICTORY_CPU_TRACE=1 AND VICTORY_CPU_TRACE_PATH=<fresh local file>.
+One process-wide worker creates a new .partial file, writes/flushes records
+outside the capture mutex, stops after 600 windows or a 900s polling deadline,
+and publishes only a complete footer + successful file sync using a same-
+directory hard link (no overwrite, unsupported FS refuses). The deadline is
+checked between writes, not an OS I/O timeout. No join on gameplay path;
+process exit can leave a partial file. Never use .partial as accepted evidence
+(including a complete-looking footer if final publication failed). File sync
+is not directory durability. Capture begins on first enabled hook; warmup
+selection, late activation, and instrumentation on/off overhead are pending.
+The fail-closed try-lock may abort under writer contention; no speed claim.
+No actual full runtime compile or Proton validation yet. Exact hunks and
+builder registration require D09 coordinator approval; AI2 narrow wrapper
+scope consent is recorded in #13.
