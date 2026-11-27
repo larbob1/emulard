@@ -177,6 +177,11 @@ def update_counters(latest, line, quality=None):
         latest[message] = values
 
 
+# Pinned victory-gpu pipeline.rs translation Err warning. Only count lines;
+# shader identities, error payloads and raw text never leave the parser.
+SHADER_DROP_WARNING = "shader does not translate; its pipelines' draws are dropped"
+
+
 def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     if not isfinite(target_fps) or not 0.001 <= target_fps <= 10000:
         raise ValueError("target_fps must be finite and between 0.001 and 10000")
@@ -185,6 +190,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     target_ms = 1000 / target_fps
     rows = []
     seen = invalid_intervals = skipped_intervals = 0
+    shader_drop_warning_lines = 0
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
@@ -198,6 +204,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     usual_remaining = long_remaining = 0
     seen_long_numbers = set()
     for line in lines:
+        if SHADER_DROP_WARNING in line:
+            shader_drop_warning_lines += 1
         update_counters(cumulative, line, counter_quality)
         if "frame times:" in line:
             detail_header_seen = True
@@ -274,7 +282,9 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         "max_ms": max(individual_frames, default=None),
         "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
-    detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
+    detailed = {"individual_frame_times": actual,
+                "shader_translation_drop_warning_lines": shader_drop_warning_lines,
+                "shader_translation_warning_note": "Known pinned warning message lines in the entire supplied log, including warmup. Not unique shaders, executed draws, or exit cause. Zero means no matching message observed, not proven translation success.", "latest_cumulative_counters": cumulative,
                 "cumulative_counter_observations": counter_quality,
                 "cumulative_counter_note": "Latest observed sampled process totals, including warmup; not exact window totals. Missing records are unknown. Nonmonotonic observations may reflect reset or concurrent log order. Scatter batches/pages/failures are logical operations, not host syscalls.",
                 "critical_path_evidence": critical_evidence(usual_details, long_details, expected_usual, expected_long, unanchored, rejected),

@@ -60,6 +60,21 @@ class AcceptanceTests(unittest.TestCase):
         lines[0] = sample(30, 1)
         self.assertEqual(self.assess(manifest, lines)["milestones"]["30"]["status"], "failed")
 
+    def test_shader_warning_prevents_acceptance_even_with_zero_drop_intervals(self):
+        manifest, lines = fixture()
+        lines.append("WARN shader does not translate; its pipelines' draws are dropped private-error")
+        result = self.assess(manifest, lines)
+        self.assertEqual(result["milestones"]["30"]["status"], "insufficient_evidence")
+        self.assertEqual(result["runs"][0]["reported_drop_intervals"], 0)
+        self.assertEqual(result["runs"][0]["shader_translation_drop_warning_lines"], 1)
+        self.assertIn("shader_translation_drop_warning_observed", result["runs"][0]["evidence_issues"])
+        self.assertNotIn("private-error", str(result))
+        report = summarize(lines[:-1])
+        report.pop("shader_translation_drop_warning_lines")
+        self.assertEqual(evaluate(manifest, [report] * 3)["milestones"]["30"]["status"], "insufficient_evidence")
+        manifest["runs"][0]["checks"]["full_scene"] = False
+        self.assertEqual(self.assess(manifest, lines)["milestones"]["30"]["status"], "failed")
+
     def test_missing_and_inconsistent_evidence(self):
         manifest, lines = fixture()
         self.assertEqual(self.assess(manifest, lines[:1])["milestones"]["30"]["status"], "insufficient_evidence")

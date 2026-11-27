@@ -221,5 +221,17 @@ class FrameReportTests(unittest.TestCase):
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 
+class ShaderWarningTests(unittest.TestCase):
+    def test_known_warning_separate_from_interval_drops(self):
+        warning = "WARN private-synthetic-shader shader does not translate; its pipelines' draws are dropped error=private-detail"
+        report = summarize([warning, sample(300), sample(30), warning,
+                            "unrelated translation warning"], skip=1)
+        self.assertEqual(report["intervals_with_dropped_draws"], 0)
+        self.assertEqual(report["shader_translation_drop_warning_lines"], 2)
+        self.assertNotIn("private-detail", str(report))
+        self.assertEqual(summarize([warning])["shader_translation_drop_warning_lines"], 1)
+        self.assertEqual(summarize([sample()])["shader_translation_drop_warning_lines"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -102,6 +102,17 @@ class BenchmarkPairsTests(unittest.TestCase):
         self.assertEqual(row["candidate_latest_cumulative_counters"][label],
                          {"attempts": 8, "hits": 7})
 
+    def test_shader_warning_counts_separate_from_drops(self):
+        a = summarize([sample(300)])
+        b = summarize([sample(150), "shader does not translate; its pipelines' draws are dropped"])
+        result = aggregate([(a, b)])
+        self.assertEqual(result["candidate_pairs_with_reported_drops"], 0)
+        self.assertEqual(result["candidate_pairs_with_shader_translation_warnings"], 1)
+        self.assertEqual(result["runs"][0]["candidate_shader_translation_drop_warning_lines"], 1)
+        b.pop("shader_translation_drop_warning_lines")
+        result = aggregate([(a, b)])
+        self.assertEqual(result["candidate_pairs_with_unknown_shader_warning_counts"], 1)
+
     def test_empty_input(self):
         with self.assertRaises(ValueError):
             aggregate([])

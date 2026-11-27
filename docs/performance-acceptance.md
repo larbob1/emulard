@@ -15,3 +15,19 @@ Run:
 Exit 0 means the supplied evidence meets owner-attested M5 criteria, not independent verification; 1 means malformed/unavailable input; 2 means M5 failed or evidence is insufficient. All milestones remain separately reported. All runs, not just the best three, must meet a gate. Each gate requires three independent trials, complete evidence, no reported dropped draws and verified operator checks. M5 additionally requires 600 seconds per run, >=30 correctly displayed frames/s, p95 <=50 ms and p99 <=100 ms. Lower gates have no fixed duration in the roadmap; document a repeatable scene length. The evaluator compares the rounded frame-duration sum with operator wall time (one-second boundary tolerance plus 0.5 ms per frame), requires valid interval and detailed samples and rejects visible counts exceeding the detailed frame count. The first present and final partial batch may not be represented; align the measured window or repeat the trial rather than inventing samples.
 
 Distinct paths, IDs and SHA-256 content checks reject exact accidental duplicates, but cannot prove independent runs. Missing entire records may remain undetectable. Owner checks and supplied counts are self-reported. This local evaluator does not close P20, prove M0 native validation, or authorize a merge. The coordinator reviews evidence before recording any gate in the canonical register.
+
+## Independent shader translation warning check
+
+AI4's historical smoke exposed translation-drop warnings even when interval
+counters reported zero dropped draws. Reports now count the exact pinned
+pipeline.rs message "shader does not translate; its pipelines' draws are
+dropped" separately across the entire supplied input, even skipped warmup.
+A positive count or unavailable field prevents formal acceptance (insufficient
+evidence unless another correctness failure is known). A warning does not
+prove a required draw executed or explain an exit. A zero count is merely no
+matching message observed: log filtering, missing records, different runtime
+versions and earlier initialization outside the measured window may hide
+failures. Retain and review startup logs locally as part of operator checks.
+Never infer correctness from interval counters alone. Only counts are exported;
+no warning details, identities, paths or title data. This is a conservative
+review gate, not a new runtime telemetry producer or FPS optimization.

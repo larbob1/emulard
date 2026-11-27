@@ -29,6 +29,8 @@ def aggregate(pairs, visible=False):
                 / (af["samples"] * bf["duration_ms_rounded_samples"]) if frame_usable else None),
             "baseline_drop_intervals": ad,
             "candidate_drop_intervals": bd,
+            "baseline_shader_translation_drop_warning_lines": baseline.get("shader_translation_drop_warning_lines"),
+            "candidate_shader_translation_drop_warning_lines": candidate.get("shader_translation_drop_warning_lines"),
             "baseline_drop_interval_fraction": ad / baseline["samples"] if baseline["samples"] else None,
             "candidate_drop_interval_fraction": bd / candidate["samples"] if candidate["samples"] else None,
             "baseline_intervals": baseline["samples"],
@@ -63,11 +65,15 @@ def aggregate(pairs, visible=False):
         "candidate_faster_pairs": sum(r["speedup"] > 1 for r in intervals),
         "candidate_pairs_with_reported_drops": sum((r["candidate_drop_intervals"] or 0) > 0 for r in results),
         "candidate_pairs_with_unknown_drops": sum(r["candidate_drop_intervals"] is None for r in results),
+        "candidate_pairs_with_shader_translation_warnings": sum(
+            (r["candidate_shader_translation_drop_warning_lines"] or 0) > 0 for r in results),
+        "candidate_pairs_with_unknown_shader_warning_counts": sum(
+            r["candidate_shader_translation_drop_warning_lines"] is None for r in results),
         "at_least_three_pairs": len(results) >= 3,
         "at_least_three_usable_interval_pairs": len(intervals) >= 3,
         "at_least_three_usable_individual_pairs": len(frames) >= 3,
         "operator_reported_visible_scene": visible,
-        "note": "Operator must match scene/settings/warmup and independent runs. Distinct log contents do not prove independent trials or matched workloads. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. This report is not a release gate.",
+        "note": "Operator must match scene/settings/warmup and independent runs. Distinct log contents do not prove independent trials or matched workloads. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. Shader warning lines cover the entire supplied input including warmup; no known warning is not proof of rendering correctness. This report is not a release gate.",
     }
 
 def read_distinct_log(path, seen_paths, seen_contents, skip, skip_frame_batches, target_fps):

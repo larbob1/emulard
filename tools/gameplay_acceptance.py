@@ -61,6 +61,14 @@ def run_evidence(run, report):
         reasons.append("drop_evidence_missing")
     elif drops > 0:
         failures.append("reported_dropped_draws")
+    shader_warnings = report.get("shader_translation_drop_warning_lines")
+    if type(shader_warnings) is not int or shader_warnings < 0:
+        reasons.append("shader_translation_warning_evidence_missing")
+        shader_warnings = None
+    elif shader_warnings:
+        # Translation failures may concern unused/optional shaders. Do not
+        # infer executed required draws, but do not certify this trial either.
+        reasons.append("shader_translation_drop_warning_observed")
     p = frames.get("frame_ms_percentiles", {})
     p95, p99 = p.get("p95"), p.get("p99")
     if not number(p95) or not number(p99):
@@ -84,6 +92,7 @@ def run_evidence(run, report):
         "p95_ms": p95,
         "p99_ms": p99,
         "reported_drop_intervals": drops,
+        "shader_translation_drop_warning_lines": shader_warnings,
         "evidence_issues": reasons,
         "correctness_failures": failures,
         "milestones": {
