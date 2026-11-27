@@ -1,0 +1,3 @@
+# P05 exact hint metadata fast path
+
+Isolated follow-up to #9 at 72fcda9e75235505afeb69ce687d0438567afb66. Under the existing opt-in VICTORY_MAP_EXACT_PLACEHOLDERS=1 switch, exact hits remove the sole nonoverlapping entry directly instead of collecting intersecting keys into a Vec; idempotent exact records avoid discard and reinsertion. Partial/unknown/overflow behavior and host replacement checks unchanged. No new switch, host calls, lifetime or synchronization changes. Two new standalone/native-module tests plus full-cap repeat coverage; native validation deferred until active jobs finish. Synthetic prep and tests pending. No measured improvement claimed.

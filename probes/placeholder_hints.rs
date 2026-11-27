@@ -33,12 +33,19 @@ impl ExactHints {
     }
 
     pub(super) fn take(&mut self, at: usize, len: usize) -> bool {
-        let exact = self.contains(at, len);
+        // With nonoverlapping intervals, an exact hit has no other
+        // intersecting hints. Avoid the predecessor/range scan and hit Vec.
+        if self.contains(at, len) {
+            self.ranges.remove(&at);
+            return true;
+        }
         self.discard(at, len);
-        exact
+        false
     }
 
     pub(super) fn record(&mut self, at: usize, len: usize) {
+        // Recording an already exact interval is idempotent, even at cap.
+        if self.contains(at, len) { return; }
         self.discard(at, len);
         if len == 0 || self.ranges.len() >= MAX_HINTS { return; }
         if let Some(end) = at.checked_add(len) {
@@ -86,10 +93,58 @@ mod placeholder_hint_tests {
         assert!(!h.contains(10, 0));
     }
     #[test]
+    fn exact_repeat_and_mismatched_take() {
+        let mut h = ExactHints::default();
+        h.record(0, 10);
+        h.record(10, 10);
+        h.record(20, 10);
+        for _ in 0..64 { h.record(10, 10); }
+        assert_eq!(h.ranges.len(), 3);
+        assert!(h.take(10, 10));
+        assert!(h.contains(0, 10));
+        assert!(h.contains(20, 10));
+        h.record(10, 10);
+        // Same start but wrong size must still invalidate all overlaps.
+        assert!(!h.take(10, 15));
+        assert!(h.contains(0, 10));
+        assert!(!h.contains(10, 10));
+        assert!(!h.contains(20, 10));
+    }
+
+    #[test]
+    fn exact_fast_paths_match_reference_interval_operations() {
+        let mut h = ExactHints::default();
+        let mut reference = BTreeMap::new();
+        let mut seed = 0x5eeda11u32;
+        for step in 0..4096 {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let at = ((seed >> 8) % 128) as usize;
+            let len = ((seed >> 16) % 17) as usize;
+            let end = at + len;
+            let exact = len != 0 && reference.get(&at) == Some(&end);
+            if len != 0 {
+                reference.retain(|&start, last| *last <= at || start >= end);
+            }
+            match step % 3 {
+                0 => {
+                    h.record(at, len);
+                    if len != 0 { reference.insert(at, end); }
+                }
+                1 => assert_eq!(h.take(at, len), exact),
+                _ => h.discard(at, len),
+            }
+            assert_eq!(h.ranges, reference);
+        }
+    }
+
+    #[test]
     fn bounded_cache() {
         let mut h = ExactHints::default();
         for k in 0..MAX_HINTS+8 { h.record(k*2, 1); }
         assert_eq!(h.ranges.len(), MAX_HINTS);
+        h.record(0, 1);
+        assert_eq!(h.ranges.len(), MAX_HINTS);
+        assert!(h.contains(0, 1));
         assert!(!h.contains(MAX_HINTS*2, 1));
         assert!(h.take(0, 1));
         h.record(MAX_HINTS*2, 1);
