@@ -33,14 +33,14 @@ def test_result_counts(output):
     return [(int(passed), int(failed)) for passed, failed in
             re.findall(r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;", output)]
 
-def test_suite(target, package, suite, *, env=None, diagnostics=False):
+def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=None):
     command = ["cargo", "test", "--locked", "-p", package, "--lib"]
     if diagnostics:
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -53,9 +53,15 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
     print(result.stdout, end="", flush=True)
     result.check_returncode()
     counts = test_result_counts(result.stdout)
-    if not counts or sum(passed for passed, _ in counts) == 0 or any(failed for _, failed in counts):
+    passed = sum(p for p, _ in counts)
+    failed = sum(f for _, f in counts)
+    if not counts or passed == 0 or failed:
         print(f"Runtime test matched no passing tests: {package} {suite}", flush=True)
         raise subprocess.CalledProcessError(1, command)
+    if expected is not None and (len(counts) != 1 or passed != expected):
+        print(f"Runtime test count mismatch: {package} {suite} expected={expected} passed={passed}", flush=True)
+        raise subprocess.CalledProcessError(1, command)
+    print(f"Runtime test counts: {package} {suite} passed={passed} failed={failed}", flush=True)
 
 def validate_paired(target, *, keep_going=False):
     failures = []
@@ -70,8 +76,8 @@ def validate_paired(target, *, keep_going=False):
             failures.append(label)
             print(f"Runtime validation failed: {label}", flush=True)
 
-    def suite(package, name, *, env=None, diagnostics=False):
-        attempt(f"{package} {name}", lambda: test_suite(target, package, name, env=env, diagnostics=diagnostics))
+    def suite(package, name, *, env=None, diagnostics=False, expected=None):
+        attempt(f"{package} {name}", lambda: test_suite(target, package, name, env=env, diagnostics=diagnostics, expected=expected))
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
         suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
@@ -83,6 +89,13 @@ def validate_paired(target, *, keep_going=False):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_DIFF=mode, VICTORY_MAP_RUNS=mode)
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
+    suite("victory-hle", "placeholder_hint_tests")
+    env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="0", VICTORY_MAP_RUNS="0", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
+    suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+    env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="1", VICTORY_MAP_DIFF_RUNS="1", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
+    suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+    suite("victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
+    suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-gpu", "mapping_tests")
     suite("victory-gpu", "perf_hotpath_coverage_tests")
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
@@ -101,6 +114,7 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-gpu", name)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
+    suite("victory-gpu", "library_init_diagnostic_tests", diagnostics=True, expected=4)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:
@@ -157,6 +171,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_preflight.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_exact_placeholders.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
