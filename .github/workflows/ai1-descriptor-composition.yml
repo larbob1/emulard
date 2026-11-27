@@ -1,0 +1,43 @@
+name: AI1 isolated descriptor composition
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_descriptor_composition.py'
+      - '.github/workflows/ai1-descriptor-composition.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  descriptor-composition:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-descriptor-composition'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 24ae553e449bac498f29cde7395d6b6ef95ec888
+          path: ai0-pr69
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1710d374f7d6c22b6ef158f2704fb0b5653ea91c
+          path: ai0-pr70
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile and validate combined descriptor changes
+        run: python tools/validate_ai1_descriptor_composition.py --pr69 ai0-pr69 --pr70 ai0-pr70
