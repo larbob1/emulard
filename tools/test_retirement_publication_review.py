@@ -20,4 +20,4 @@ class RetirementPublicationTests(unittest.TestCase):
             result = subprocess.run(
                 [str(exe)], check=True, capture_output=True, text=True, timeout=30,
             )
-            self.assertIn("5 passed; 0 failed", result.stdout)
+            self.assertIn("7 passed; 0 failed", result.stdout)
