@@ -10,7 +10,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | --- | --- | --- | --- |
 | P01 | 1 | Open | Compile the paired-wave candidate, run phase 1–6 tests on Windows and Proton, including aliases, partial failures, concurrent readers and replay. Record real results. |
 | P02 | 1 | Candidate | Local repeat-pair numeric benchmark aggregator added. Actual matched gameplay runs, CPU/GPU utilization, frame-level tails and native Windows versus Proton comparison remain open. |
-| P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters. Full per-frame distribution and critical-path attribution remain open. |
+| P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters and actual rounded individual frame distributions from detailed frame batches. Critical-path attribution and real workload verification remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
 | P05 | 2 | Open | Full placeholder interval tracking and coalescing/splitting optimization; demonstrate fewer host calls on captured workloads. |
 | P06 | 2 | Open | Transactional mapper failure recovery, checked map/unmap results, rollback or documented failure semantics; fault-injection tests. |
@@ -79,3 +79,5 @@ P01/P24: the cumulative paired-wave test runner now requires at least one passin
 - [Windows runtime CI 45936234001](https://github.com/larbob1/emulard/actions/runs/45936234001): after the LF normalization fix, pinned source preparation and toolchain checks passed. The subsequent runtime test/build stage failed (exit 1); no specific error code was retained by that run. The failing stage is not resolved.
 - [Synthetic CI 45936436022](https://github.com/larbob1/emulard/actions/runs/45936436022) for commit `69f7f49c36eb09b885f82bfb7aaf93fee7c3f0ae`: 101 Python tests and four standalone Rust tests passed. This includes CRLF patch handling, replay patcher, report aggregation and nonempty suite enforcement. The full runtime is still unverified.
 - P01/P24 remain open; P02/P03/P08 have candidates, not completed acceptance. P04–P07, P09–P17, P18–P23 remain as listed in the table. No FPS result or closure is claimed.
+
+P03: detailed present-to-present frame batches now produce independent p50/p90/p95/p99 and maximum frame times, with count validation and separate warmup exclusion. No runtime measurements are available.

@@ -49,6 +49,23 @@ def stats(rows):
 LONG_FRAME = re.compile(rf"\blong frame [0-9]+ at {NUMBER} s: (?P<ms>{NUMBER}) ms \|")
 OMITTED_LONG = re.compile(r"\blong frames: (?P<count>[0-9]+) more in this reading are not listed")
 
+# The upstream framelog emits every rounded frame duration in a batch.
+# Match the complete numeric payload and validate its declared count.
+FRAME_BATCH = re.compile(
+    rf"\bframe times: (?P<count>[0-9]+) frames in {NUMBER} s: shortest {NUMBER} ms, "
+    rf"median {NUMBER}, longest {NUMBER}; [0-9]+ long \(over {NUMBER} ms, "
+    rf"the usual frame of the last [0-9]+ being {NUMBER}\); each: (?P<each>[0-9 ]+)\s*$"
+)
+
+def frame_batch(line):
+    match = FRAME_BATCH.search(line)
+    if not match:
+        return None
+    values = [int(v) for v in match["each"].split()]
+    if not values or len(values) != int(match["count"]):
+        return None
+    return values
+
 def percentile(values, fraction):
     """Nearest rank, on the supplied sample population only."""
     ordered = sorted(values)
@@ -73,14 +90,24 @@ def update_counters(latest, line):
         if len(values) == len(fields):
             latest[message] = values
 
-def summarize(lines, skip=0):
+def summarize(lines, skip=0, skip_frame_batches=0):
     rows = []
     seen = 0
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
+    individual_frames = []
+    batches_seen = invalid_batches = 0
     for line in lines:
         update_counters(cumulative, line)
+        if "frame times:" in line:
+            batch = frame_batch(line)
+            if batch is None:
+                invalid_batches += 1
+            else:
+                batches_seen += 1
+                if batches_seen > skip_frame_batches:
+                    individual_frames.extend(batch)
         if seen >= skip:
             long = LONG_FRAME.search(line)
             if long:
@@ -103,7 +130,16 @@ def summarize(lines, skip=0):
             row = {key: float(value) for key, value in match.groupdict().items()}
             if row["frame"] > 0:
                 rows.append(row)
-    detailed = {"latest_cumulative_counters": cumulative,
+    actual = {
+        "samples": len(individual_frames),
+        "batches_skipped": min(batches_seen, skip_frame_batches),
+        "batches_used": max(0, batches_seen - skip_frame_batches),
+        "invalid_batches": invalid_batches,
+        "frame_ms_percentiles": {f"p{p}": percentile(individual_frames, p / 100) for p in (50, 90, 95, 99)},
+        "max_ms": max(individual_frames, default=None),
+        "note": "Individual present-to-present durations rounded to integer milliseconds. Independent of interval warmup and drop counts; not proof of correct rendering.",
+    }
+    detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
                 "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
                 "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases),
                 "reported_long_frames": {"samples": len(long_frames), "max_ms": max(long_frames, default=None),
@@ -147,16 +183,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path)
     parser.add_argument("--baseline", type=Path, help="optional comparison log for the same workload")
-    parser.add_argument("--skip", type=int, default=0, help="ignore initial matching samples")
+    parser.add_argument("--skip", type=int, default=0, help="ignore initial matching FPS intervals")
+    parser.add_argument("--skip-frame-batches", type=int, default=0, help="independently ignore initial detailed frame batches")
     args = parser.parse_args()
-    if args.skip < 0:
-        parser.error("--skip must be nonnegative")
+    if args.skip < 0 or args.skip_frame_batches < 0:
+        parser.error("warmup counts must be nonnegative")
     try:
         with args.log.open(encoding="utf-8", errors="replace") as handle:
-            report = summarize(handle, args.skip)
+            report = summarize(handle, args.skip, args.skip_frame_batches)
         if args.baseline:
             with args.baseline.open(encoding="utf-8", errors="replace") as handle:
-                report["comparison"] = compare(summarize(handle, args.skip), report)
+                report["comparison"] = compare(summarize(handle, args.skip, args.skip_frame_batches), report)
     except OSError:
         print(json.dumps({"samples": 0, "status": "log unavailable"}))
         return 1

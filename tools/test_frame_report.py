@@ -73,6 +73,18 @@ class FrameReportTests(unittest.TestCase):
         self.assertEqual(counts["unchanged physical mapping requests skipped"]["count"], 16)
         self.assertNotIn("private", str(report))
 
+    def test_actual_frame_batches(self):
+        line = "private frame times: 4 frames in 0.5 s: shortest 10 ms, median 30, longest 400; 1 long (over 100 ms, the usual frame of the last 64 being 20); each: 10 20 40 400"
+        bad = line.replace("4 frames", "5 frames")
+        result = summarize([line, bad, line, sample()], skip_frame_batches=1)
+        actual = result["individual_frame_times"]
+        self.assertEqual(actual["samples"], 4)
+        self.assertEqual(actual["batches_skipped"], 1)
+        self.assertEqual(actual["invalid_batches"], 1)
+        self.assertEqual(actual["frame_ms_percentiles"]["p95"], 400)
+        self.assertEqual(actual["frame_ms_percentiles"]["p50"], 20)
+        self.assertNotIn("private", str(result))
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 
