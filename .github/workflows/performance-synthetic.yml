@@ -25,3 +25,31 @@ jobs:
         run: |
           rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-tests
           /tmp/emulard-range-gate-tests
+
+  portable-copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare pinned runtime source
+        run: |
+          if python tools/build_runtime.py "$RUNNER_TEMP/runtime" --paired-wave-refresh > "$RUNNER_TEMP/prepare.log" 2>&1; then
+            echo "Pinned source prepared"
+          else
+            echo "Pinned source preparation failed"
+            exit 1
+          fi
+      - name: Compile and test actual portable copy helpers
+        run: |
+          if python tools/check_copy_helpers.py "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/copy-tests.log" 2>&1; then
+            grep -E '^Portable copy helper tests:|^running [0-9]+ tests|^test result:' "$RUNNER_TEMP/copy-tests.log"
+          else
+            grep -E '^error\[E[0-9]+\]|^test result:|^Portable copy helper validation failed' "$RUNNER_TEMP/copy-tests.log" || true
+            exit 1
+          fi

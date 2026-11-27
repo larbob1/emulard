@@ -52,6 +52,62 @@ class FrameReportTests(unittest.TestCase):
         self.assertNotIn("private prefix", str(result))
         self.assertEqual(summarize([line])["long_frame_samples"], 1)
 
+    def test_interval_percentiles_and_milestones(self):
+        report = summarize([sample(20), sample(50), sample(100, 1), sample(300),
+                            "long frame 3 at 3.0 s: 400 ms | other details",
+                            "long frames: 4 more in this reading are not listed"])
+        self.assertEqual(report["reported_interval_frame_ms_percentiles"]["p95"], 300)
+        self.assertEqual(report["fps_milestones"]["20"]["intervals"], 2)
+        self.assertEqual(report["fps_milestones"]["10"]["without_reported_drops_or_pending"], 2)
+        self.assertEqual(report["reported_long_frames"]["max_ms"], 400)
+        self.assertEqual(report["reported_long_frames"]["omitted_count"], 4)
+
+    def test_cumulative_counters_not_summed(self):
+        report = summarize([sample(), "private mapping diff totals calls=2 saved=10 mapped=3 scatter=4",
+                            "mapping diff totals calls=4 saved=17 mapped=6 scatter=7",
+                            "texture short-lock totals calls=8 bytes=512 copy_us=30 unlocked_us=90 retries=1",
+                            "unchanged physical mapping requests skipped count=16"])
+        counts = report["latest_cumulative_counters"]
+        self.assertEqual(counts["mapping diff totals"]["saved"], 17)
+        self.assertEqual(counts["texture short-lock totals"]["retries"], 1)
+        self.assertEqual(counts["unchanged physical mapping requests skipped"]["count"], 16)
+        self.assertNotIn("private", str(report))
+
+    def test_actual_frame_batches(self):
+        line = "private frame times: 4 frames in 0.5 s: shortest 10 ms, median 30, longest 400; 1 long (over 100 ms, the usual frame of the last 64 being 20); each: 10 20 40 400"
+        bad = line.replace("4 frames", "5 frames")
+        result = summarize([line, bad, line, sample()], skip_frame_batches=1)
+        actual = result["individual_frame_times"]
+        self.assertEqual(actual["samples"], 4)
+        self.assertEqual(actual["batches_skipped"], 1)
+        self.assertEqual(actual["invalid_batches"], 1)
+        self.assertEqual(actual["frame_ms_percentiles"]["p95"], 400)
+        self.assertEqual(actual["frame_ms_percentiles"]["p50"], 20)
+        self.assertNotIn("private", str(result))
+
+    def test_30_fps_budget_and_actual_present_rate(self):
+        batch = "frame times: 3 frames in 0.1 s: shortest 10 ms, median 30, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 10 30 60"
+        report = summarize([sample(33), sample(34), sample(20, 1), batch], target_fps=30)
+        self.assertAlmostEqual(report["target_frame_ms"], 1000 / 30, places=5)
+        self.assertEqual(report["intervals_at_or_below_target"], 2)
+        self.assertEqual(report["intervals_meeting_target_without_reported_drops"], 1)
+        actual = report["individual_frame_times"]
+        self.assertEqual(actual["approx_present_fps"], 30)
+        self.assertEqual(actual["frames_within_target_ms"], 2)
+        self.assertEqual(compare(report, report)["approx_present_fps_ratio"], 1)
+        for value in (0, -1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                summarize([], target_fps=value)
+
+    def test_hotpath_counters(self):
+        result = summarize(["mapping diff run totals runs=4 pages=16", "texture view estimate hits hits=8"])
+        self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)
+        self.assertEqual(result["latest_cumulative_counters"]["texture view estimate hits"]["hits"], 8)
+
+    def test_alias_direct_counters(self):
+        result = summarize(["alias direct run totals attempts=2 hits=1", "alias direct run totals attempts=4 hits=3"])
+        self.assertEqual(result["latest_cumulative_counters"]["alias direct run totals"], {"attempts": 4, "hits": 3})
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

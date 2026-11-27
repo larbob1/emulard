@@ -11,28 +11,144 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 
+def validation_summary(lines):
+    # Only emit fixed suite names, statuses and allowlisted binary flags.
+    # Associate switches with the result for that individual invocation.
+    switches = b""
+    results = []
+    for line in lines:
+        if re.fullmatch(rb"Running runtime test: victory-[a-z-]+ [A-Za-z0-9_]+\s*", line):
+            switches = b""
+        setting = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
+        if setting:
+            switches = setting[1].strip()
+        status = re.fullmatch(rb"Runtime validation (passed|failed): ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
+        if status:
+            extra = b" [" + switches + b"]" if switches and status[2].startswith(b"victory-") else b""
+            results.append((status[1] + b": " + status[2] + extra).decode("ascii"))
+            switches = b""
+    return results
+
 def run_stage(label, args, cwd):
     # Do not publish external source excerpts, local paths or raw tool logs.
     # Report only a stage name, exit status, and structured Rust error codes.
     print(f"Starting: {label}", flush=True)
     with tempfile.TemporaryFile(mode="w+b") as output:
         result = subprocess.run(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT)
+        if label == "Paired-wave tests and release/diag compilation":
+            output.seek(0)
+            for summary in validation_summary(output):
+                print("Validation result: " + summary, flush=True)
         if result.returncode:
             output.seek(0)
             codes = set()
             preparation = set()
             unresolved = set()
             locations = set()
+            patches = set()
+            last_patch = None
+            patch_locations = set()
+            categories = set()
+            last_test = None
+            empty_tests = set()
+            panic_locations = set()
+            last_switches = None
+            failed_tests = set()
+            failed_groups = []
+            alias_checks = []
             for line in output:
+                alias = re.search(rb"\balias-check-(4[0-2]|5[1-8]) page ([0-2])\b", line)
+                if alias:
+                    alias_checks.append(f"step={alias[1].decode('ascii')} page={alias[2].decode('ascii')}")
+                group = re.fullmatch(rb"Runtime validation failed: ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
+                if group:
+                    failed_groups.append(group[1].decode("ascii"))
+                switches = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
+                if switches:
+                    last_switches = switches[1].decode("ascii")
+                panic = re.search(rb"panicked at ((?:crates|apps)[\\/][A-Za-z0-9_\\/.-]+\.rs):([0-9]+):([0-9]+)", line)
+                if panic:
+                    panic_locations.add(b":".join(panic.groups()).replace(b"\\", b"/").decode("ascii"))
+                failure = re.fullmatch(rb"test ([A-Za-z0-9_:]+) \.\.\. FAILED\s*", line)
+                if failure:
+                    failed_tests.add(failure[1].decode("ascii"))
+                test = re.fullmatch(rb"Running runtime test: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
+                if test:
+                    last_test = test[1].decode("ascii")
+                empty = re.fullmatch(rb"Runtime test matched no passing tests: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
+                if empty:
+                    empty_tests.add(empty[1].decode("ascii"))
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
+                for phrase, category in (
+                    (b"panicked at", "runtime test panic"),
+                    (b"test result: failed", "runtime test assertion failure"),
+                    (b"status_access_violation", "runtime access violation"),
+                    (b"0xc0000005", "runtime access violation"),
+                    (b"stack overflow", "stack overflow"),
+                    (b"failed to run custom build command", "dependency build failure"),
+                    (b"linking with", "linker failure"),
+                    (b"failed to get", "dependency fetch failure"),
+                    (b"failed to download", "dependency download failure"),
+                    (b"could not compile", "compilation failure"),
+                    (b"no space left", "insufficient disk space"),
+                    (b"out of memory", "out of memory"),
+                    (b"test failed", "test process failure"),
+                    (b"error: aborting", "compiler aborted"),
+                    (b"error: process didn't exit successfully", "child process failure"),
+                ):
+                    if phrase in line.lower():
+                        categories.add(category)
                 if b"error[E0425]" in line:
                     unresolved.update(re.findall(rb"\x60([A-Za-z_][A-Za-z_0-9]*)\x60", line))
                 location = re.search(rb"--> (crates[\\/][A-Za-z0-9_-]+[\\/]src[\\/][A-Za-z0-9_\\/.-]+\.rs):([0-9]+):([0-9]+)", line)
                 if location:
                     locations.add(b":".join(location.groups()).replace(b"\\", b"/"))
                 if label == "Pinned source preparation":
+                    applied = re.fullmatch(rb"Applying patch: ([a-z0-9][a-z0-9-]+\.patch)\s*", line)
+                    if applied:
+                        last_patch = applied[1].decode("ascii")
+                    failed = re.search(rb"patch failed: ((?:crates|apps)/[A-Za-z0-9_./-]+\.rs):([0-9]+)", line)
+                    if failed:
+                        patch_locations.add(b":".join(failed.groups()).decode("ascii"))
                     for name in re.findall(rb"apply_[a-z_]+\.py", line):
                         preparation.add(name.decode("ascii"))
+                    for name in re.findall(rb"[a-z0-9][a-z0-9-]+\.patch", line):
+                        patches.add(name.decode("ascii"))
+                    for phrase, category in (
+                        (b"patch does not apply", "patch context mismatch"),
+                        (b"patch failed", "patch context mismatch"),
+                        (b"source anchor", "source anchor mismatch"),
+                        (b"could not resolve host", "network DNS failure"),
+                        (b"could not read username", "authentication unavailable"),
+                        (b"repository not found", "upstream repository unavailable"),
+                        (b"failed to connect", "network connection failure"),
+                        (b"unable to access", "upstream access failure"),
+                        (b"trailing whitespace", "patch whitespace failure"),
+                    ):
+                        if phrase in line.lower():
+                            categories.add(category)
+            if last_test:
+                print("Last runtime suite attempted: " + last_test)
+            if last_switches:
+                print("Runtime test switches: " + last_switches)
+            if panic_locations:
+                print("Runtime panic locations: " + ", ".join(sorted(panic_locations)))
+            if alias_checks:
+                print("Failed synthetic alias checks: " + ", ".join(alias_checks))
+            if failed_groups:
+                print("Failed validation groups: " + ", ".join(failed_groups))
+            if failed_tests:
+                print("Failed runtime test names: " + ", ".join(sorted(failed_tests)))
+            if empty_tests:
+                print("Empty runtime suites: " + ", ".join(sorted(empty_tests)))
+            if last_patch:
+                print("Last patch attempted: " + last_patch)
+            if patch_locations:
+                print("Patch context locations: " + ", ".join(sorted(patch_locations)))
+            if categories:
+                print("Failure categories: " + ", ".join(sorted(categories)))
+            if patches:
+                print("Patch names mentioned: " + ", ".join(sorted(patches)))
             if preparation:
                 print("Preparation scripts mentioned: " + ", ".join(sorted(preparation)))
             if unresolved:
@@ -47,7 +163,9 @@ def run_stage(label, args, cwd):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lighting-memory", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--lighting-memory", action="store_true")
+    mode.add_argument("--paired-wave-refresh", action="store_true")
     args = parser.parse_args()
     if os.name != "nt":
         parser.error("Windows build host required.")
@@ -60,6 +178,13 @@ def main():
                 ROOT / "tools",
             )
             prepare = [sys.executable, str(ROOT / "tools" / "build_runtime.py"), str(target)]
+            if args.paired_wave_refresh:
+                run_stage("Pinned source preparation", prepare + ["--paired-wave-refresh"], ROOT)
+                run_stage("Pinned Rust toolchain", ["cargo", "--version"], target)
+                run_stage("Paired-wave tests and release/diag compilation",
+                          [sys.executable, str(ROOT / "tools" / "ci_paired_tests.py"), str(target)], ROOT)
+                print("Paired-wave compile and test checks completed. No gameplay execution was attempted.", flush=True)
+                return 0
             if args.lighting_memory:
                 prepare.append("--lighting-memory")
             run_stage("Pinned source preparation", prepare, ROOT)
