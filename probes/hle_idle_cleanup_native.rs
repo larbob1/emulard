@@ -1,4 +1,4 @@
-// Native Windows thread-handle / Rust TLS cleanup boundary, test-only clone.
+// Native Windows thread-handle / post-work / Rust TLS cleanup boundary, test-only clone.
 // Does not load title images or exercise their forwarded loader callbacks.
 #[cfg(test)]
 mod hle_idle_cleanup_native_review {
@@ -20,36 +20,40 @@ mod hle_idle_cleanup_native_review {
     static RELEASE: OnceLock<Mutex<Option<mpsc::Receiver<()>>>> = OnceLock::new();
     static HANDLES: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
-    struct Cleanup {
-        pool: &'static ReviewPool,
-        first: bool,
-    }
+    static TLS_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            if !self.first { return; }
-            // This is ordinary Rust TLS cleanup, not a Windows loader hook.
-            // Never hold the admission mutex across the gate.
-            if self.pool.state.try_lock().is_err() { return; }
-            let id = unsafe { GetCurrentThreadId() };
-            if let Some(tx) = CLEANUP_ENTERED.get() {
-                let _ = tx.send(id);
-            }
-            let rx = RELEASE.get().and_then(|m| m.lock().ok())
-                .and_then(|mut slot| slot.take());
-            if let Some(rx) = rx {
-                let _ = rx.recv_timeout(LIMIT * 3);
-            }
+            // May run during platform-managed TLS cleanup. Only a fixed
+            // atomic observation: no gate, mutex, allocation, or callback.
+            TLS_DROPS.fetch_add(1, Ordering::SeqCst);
         }
     }
     thread_local! {
         static CLEANUP: RefCell<Option<Cleanup>> = const { RefCell::new(None) };
     }
 
+    fn before_body_return(pool: &'static ReviewPool) {
+        // This gate is after Pool::work returned, NOT in a TLS destructor.
+        if pool.state.try_lock().is_err() { return; }
+        let id = unsafe { GetCurrentThreadId() };
+        if let Some(tx) = CLEANUP_ENTERED.get() {
+            let _ = tx.send(id);
+        }
+        let rx = RELEASE.get().and_then(|m| m.lock().ok())
+            .and_then(|mut slot| slot.take());
+        if let Some(rx) = rx {
+            let _ = rx.recv_timeout(LIMIT * 3);
+        }
+    }
+
     fn start(pool: &'static ReviewPool) {
         let first = FIRST.swap(false, Ordering::SeqCst);
         let handle = std::thread::spawn(move || {
-            CLEANUP.with(|slot| *slot.borrow_mut() = Some(Cleanup { pool, first }));
+            CLEANUP.with(|slot| *slot.borrow_mut() = Some(Cleanup));
             pool.work();
+            if first { before_body_return(pool); }
         });
         lock(&HANDLES).push(handle);
     }
@@ -120,5 +124,6 @@ mod hle_idle_cleanup_native_review {
         }
         assert!(rx.try_recv().is_err());
         assert!(lock(&HANDLES).is_empty());
+        assert_eq!(TLS_DROPS.load(Ordering::SeqCst), 2);
     }
 }
