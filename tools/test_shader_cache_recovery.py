@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compile the exact runtime cache policy against deterministic cache faults."""
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ macro_rules! warn { ($($tt:tt)*) => {{}} }
 macro_rules! debug { ($($tt:tt)*) => {{}} }
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::OnceLock;
 use std::path::{Path, PathBuf};
 type HostShader = Vec<u8>;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -36,8 +38,10 @@ trait Converter: Send + Sync {
 }
 static MISSES: AtomicU64 = AtomicU64::new(0);
 static HITS: AtomicU64 = AtomicU64::new(0);
+static DECODES: AtomicU64 = AtomicU64::new(0);
 fn encode(s: &HostShader) -> Vec<u8> { s.clone() }
 fn decode(s: &[u8]) -> Option<HostShader> {
+    DECODES.fetch_add(1, Ordering::Relaxed);
     (s.first() == Some(&7)).then(|| s.to_vec())
 }
 struct Cache { path: PathBuf, unreadable: bool }
@@ -70,6 +74,27 @@ fn main() {
     let build = [0u8; 32];
     let expected = Ok(vec![7, 8, 9]);
     match args[1].as_str() {
+        "reuse" => {
+            assert!(reuse_translated_on());
+            assert!(reuse_translated(Some("1")));
+            for value in [None, Some(""), Some("0"), Some("true"), Some(" 1")] {
+                assert!(!reuse_translated(value));
+            }
+            assert_eq!(cached(&cache, &build, b"x", translate), expected);
+            assert_eq!(DECODES.load(Ordering::Relaxed), 0);
+            assert_eq!(std::fs::read(&path).unwrap(), vec![7, 8, 9]);
+            assert_eq!(cached(&cache, &build, b"x", translate), expected);
+            assert_eq!(DECODES.load(Ordering::Relaxed), 1);
+            assert_eq!(runs.load(Ordering::Relaxed), 1);
+            assert_eq!(MISSES.load(Ordering::Relaxed), 1);
+            assert_eq!(HITS.load(Ordering::Relaxed), 1);
+        }
+        "strict" => {
+            assert!(reuse_translated_on());
+            assert_eq!(cached_with_policy(&cache, &build, b"x", translate, false), expected);
+            assert_eq!(DECODES.load(Ordering::Relaxed), 1);
+            assert_eq!(runs.load(Ordering::Relaxed), 1);
+        }
         "hit" => {
             assert_eq!(cached(&cache, &build, b"x", translate), expected);
             assert_eq!(cached(&cache, &build, b"x", translate), expected);
@@ -135,10 +160,11 @@ class ShaderCacheRecoveryTests(unittest.TestCase):
         subprocess.run(["rustc", "--edition=2021", str(source), "-o", str(cls.binary)],
                        check=True, capture_output=True, text=True)
 
-    def check(self, name):
+    def check(self, name, reuse="0"):
         with tempfile.TemporaryDirectory() as directory:
+            env = dict(os.environ, VICTORY_SHADER_CACHE_REUSE_TRANSLATED=reuse)
             subprocess.run([str(self.binary), name, directory], check=True,
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=env, timeout=15)
 
     def test_hit(self):
         self.check("hit")
@@ -157,3 +183,14 @@ class ShaderCacheRecoveryTests(unittest.TestCase):
 
     def test_damaged(self):
         self.check("damaged")
+
+    def test_reuse_cold_then_hit(self):
+        self.check("reuse", "1")
+
+    def test_reuse_preserves_offline_verification(self):
+        self.check("strict", "1")
+
+    def test_reuse_existing_failure_paths(self):
+        for name in ("publication", "unsupported", "warm", "unreadable", "damaged"):
+            with self.subTest(name=name):
+                self.check(name, "1")
