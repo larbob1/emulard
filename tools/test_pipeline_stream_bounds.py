@@ -94,6 +94,8 @@ class PipelineStreamBoundsTests(unittest.TestCase):
         parser, = [x for x in postimages() if "fn create_stream(" in x]
         self.assertLess(host.index("if !input_layout_extent_valid"), host.index("std::slice::from_raw_parts"))
         self.assertLess(host.index("SemanticName.0.is_null()"), host.index("CStr::from_ptr"))
+        self.assertLess(host.index("if !input_offsets_valid"), host.index("CStr::from_ptr"))
+        self.assertLess(host.index("targets.NumRenderTargets as usize >"), host.index("self.targets = targets;"))
         self.assertIn("if !unsafe {\n            graphics.read", parser)
         self.assertIn("return E_INVALIDARG;", parser.split("graphics.read", 1)[1])
 
@@ -123,6 +125,20 @@ fn real_array_accepted() {
     let values = [0u64; 3];
     assert!(input_layout_extent_valid(values.as_ptr(), values.len()));
 }
+#[test]
+fn explicit_append_and_slot_boundaries() {
+    assert!(input_offsets_valid([]));
+    assert!(input_offsets_valid([(31, 0, 4), (31, u32::MAX, 4), (0, u32::MAX, 8)]));
+    assert!(!input_offsets_valid([(32, 0, 4)]));
+    assert!(!input_offsets_valid([(u32::MAX, 0, 4)]));
+}
+#[test]
+fn explicit_and_appended_overflows_rejected() {
+    assert!(!input_offsets_valid([(0, u32::MAX - 1, 4)]));
+    assert!(!input_offsets_valid([(0, u32::MAX - 4, 4), (0, u32::MAX, 4)]));
+    assert!(input_offsets_valid([(0, u32::MAX - 4, 4), (1, u32::MAX, 4)]));
+    assert!(input_offsets_valid([(0, u32::MAX - 4, 4), (0, 0, 4), (0, u32::MAX, 4)]));
+}
 '''
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -132,7 +148,7 @@ fn real_array_accepted() {
             subprocess.run(["rustc", "--edition=2021", "--test", str(source), "-o", str(binary)],
                            check=True, capture_output=True, text=True)
             result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
-            self.assertIn("4 passed; 0 failed", result.stdout)
+            self.assertIn("6 passed; 0 failed", result.stdout)
 
     @unittest.skipUnless(shutil.which("rustc"), "rustc required for portable stream tests")
     def test_compiled_parser_regressions(self):
