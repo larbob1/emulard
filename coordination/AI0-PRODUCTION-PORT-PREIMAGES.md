@@ -28,3 +28,25 @@ Reconstructed with-fixture shadow and texture hashes match actual historical #87
 - AI4 required for actual rendering/copyback/texture parity before runtime inclusion; only under separate authorized local plan. Existing pressure guards and no-title-launch restriction retained. AI3 owns performance acceptance. No merge approval, no production edits, no timing or FPS claims.
 
 Source evidence: #87 exact 4248ed701ff0f4ad984b9d694642461e43a5f7e1 / native 46066027550; #90 exact 573b2d5be276e80572f9548fc6dc187ea0b63dc2 / standalone 46067740495. Exact preview pins #64 a120dd694f4c57256b9ad585dbaceadd0df2d21b and #65 e0770142d98be9fe7fe76ca6f29530f4a958010e. #87 runner d827521370993e267e3dcacd3abf08bbc14a9c63; #90 fixture 8523f85ad032050819619182bc1e92246d4d0864.
+
+
+## Registration contract proposal — 7228363634
+
+Current builder blob 31bc201ad006b304542e8b03405c1a9090d76804 has mutually exclusive upstream modes, a new-directory requirement, and a single paired-wave patch chain. Existing GPU copy transform ca74c78c0eb9c32529c4c941a526ecb78a995801 runs before later mapping patchers; the proven historical preimages are the *end* of the existing paired-wave chain. Proposed optional build-time selection after the last existing patcher and before git diff --check, not an environment switch on every hot call. This is a proposed choice for review, not an approved CLI, implementation or default change.
+
+Keep three explicit independent selection bits: C = #82 correctness correction, D = #64 detile optimization, S = #65 spread optimization. All omitted means unchanged existing prepared source. C is a correctness candidate rather than a performance experiment; do not authorize an unfixed title run or declare C default-on in this review. D/S remain opt-in. Reject these selections for other upstream modes and reject an existing checkout. Use a fresh disposable directory for every build; never reverse-patch a running or installed runtime.
+
+| C D S | Expected shadow state | Expected texture state |
+| --- | --- | --- |
+| 0 0 0 | prepared | raw |
+| 1 0 0 | corrected | raw |
+| 0 1 0 | prepared | #64 only |
+| 0 0 1 | prepared | #65 only |
+| 0 1 1 | prepared | #64 + #65 |
+| 1 1 0 | corrected | #64 only |
+| 1 0 1 | corrected | #65 only |
+| 1 1 1 | corrected | #64 + #65 |
+
+Every source state refers to the exact without-additional-fixture blob above. Record upstream, existing patcher identity, selection bits, pre/postimage identities, complete changed-file inventory and compile profile in a receipt. Preflight both source inputs and all selected replacements in memory before the first write; validate full postimages; on any failed write or check mark the scratch checkout invalid and never compile/install it. Require no changed files outside the requested paths relative to the prepared baseline. Reject changed preimage, already applied, partial/mixed application, duplicate or absent anchor, mixed CR/LF, unsupported revision/mode and unexpected changed-file inventory. Validate zero-mode byte identity, single-mode independence and both combined texture orders. Rollback means rebuilding the exact selected control in a new directory, not mutating a runtime. Test the patcher contract using synthetic strings and actual pinned source; existing patcher tests only test anchor presence, insufficient on their own for this contract.
+
+Native validation: exact baseline #82 expected debug failure only in isolated regression fixture, corrected regression debug/release/diagnostics; texture 10 original tests and independently pinned oracle for each D/S combination with debug and optimized execution. Test fixture injection remains test-only and changes source identity; production-only release/diagnostics builds need separate receipts. Full existing paired suite for control and selected combined candidate; retain exact nonempty test results, do not claim all eight modes native until executed. AI2/AI3 review actual selected modes and test budget before registration. AI4 local correctness required only on an explicitly authorized exact candidate, D22–D25 unchanged. No timing or FPS claim.
