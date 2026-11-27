@@ -42,6 +42,34 @@ class StorageReportTests(unittest.TestCase):
         self.assertIsNone(empty["weighted_destination_mb_per_s"])
         self.assertFalse(compare_storage(empty, result)["comparison_usable"])
 
+    def test_ambiguous_assignments_and_window_markers(self):
+        good = window()
+        bad = [good + " waiting=bad", good + " waiting=",
+               good + " mb_per_s=1", good + " dstorage: last malformed",
+               good.replace("waiting=3", "waiting=3x"),
+               good.replace("mb_per_s=20", "mb_per_s=20.0.0")]
+        result = summarize_storage(configuration() + bad + [good])
+        self.assertEqual(result["windows_invalid_after_warmup"], len(bad))
+        self.assertEqual(result["windows_used"], 1)
+        self.assertFalse(compare_storage(result, result)["comparison_usable"])
+        malformed_config = configuration()
+        malformed_config[0] += " workers=bad"
+        self.assertFalse(summarize_storage(malformed_config + [good])
+                         ["worker_configuration_verified"])
+
+    def test_numeric_limits_refuse_without_losing_valid_rows(self):
+        good = window()
+        bad = [good.replace("requests=10", "requests=" + str(2**64)),
+               good.replace("requests=10", "requests=" + "9" * 5000),
+               good.replace("mb_per_s=20", "mb_per_s=" + "9" * 400),
+               window(seconds="9" * 400),
+               window(seconds="0.0000000001")]
+        result = summarize_storage(configuration() + bad + [good])
+        self.assertEqual(result["windows_invalid_after_warmup"], len(bad))
+        self.assertEqual(result["windows_used"], 1)
+        self.assertEqual(result["weighted_destination_mb_per_s"], 20)
+        json.dumps(result, allow_nan=False)
+
     def test_config_and_zero_denominator(self):
         duplicate = summarize_storage(configuration() * 2 + [window()])
         self.assertFalse(duplicate["worker_configuration_verified"])

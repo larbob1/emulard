@@ -10,7 +10,9 @@ from pathlib import Path
 import re
 from statistics import median
 
-WINDOW = re.compile(r"\bdstorage: last ([0-9]+(?:\.[0-9]+)?) s\b")
+WINDOW_MARKER = re.compile(r"\bdstorage: last\b")
+WINDOW = re.compile(r"\bdstorage: last ([0-9]{1,20}(?:\.[0-9]{1,9})?) s\b")
+MAX_U64 = 2**64 - 1
 INT_FIELDS = ("requests", "staging_waits", "waiting", "bcpack_mb")
 RATE_FIELDS = ("mb_per_s", "busy_workers", "reading_workers", "bcpack_workers")
 PHYSICAL_MARKERS = {
@@ -22,13 +24,22 @@ PHYSICAL_MARKERS = {
 }
 
 
+def parse_number(token, integer=False):
+    # Producer emits unsigned integer counters and fixed-point rates.
+    # Reject implausibly large/malformed tokens before conversion.
+    pattern = r"[0-9]{1,20}" if integer else r"[0-9]{1,20}(?:\.[0-9]{1,9})?"
+    if re.fullmatch(pattern, token) is None:
+        return None
+    value = int(token) if integer else float(token)
+    return value if (integer or isfinite(value)) and value <= MAX_U64 else None
+
+
 def numeric_field(line, name, integer=False):
-    number = r"[0-9]+" if integer else r"[0-9]+(?:\.[0-9]+)?"
-    matches = re.findall(rf"(?:^|\s){name}=({number})(?=\s|$)", line)
+    # Count every assignment, including malformed duplicates.
+    matches = re.findall(rf"(?:^|\s){name}=([^\s]*)", line)
     if len(matches) != 1:
         return None
-    value = int(matches[0]) if integer else float(matches[0])
-    return value if integer or isfinite(value) else None
+    return parse_number(matches[0], integer)
 
 
 def summarize_storage(lines, skip=0):
@@ -54,11 +65,12 @@ def summarize_storage(lines, skip=0):
         if seen <= skip:
             skipped += 1
             continue
-        match = WINDOW.search(line)
-        seconds = float(match[1]) if match else 0
+        markers = list(WINDOW_MARKER.finditer(line))
+        match = WINDOW.match(line, markers[0].start()) if len(markers) == 1 else None
+        seconds = parse_number(match[1]) if match else None
         row = {key: numeric_field(line, key, key in INT_FIELDS)
                for key in INT_FIELDS + RATE_FIELDS}
-        if not isfinite(seconds) or seconds <= 0 or any(value is None for value in row.values()):
+        if seconds is None or seconds <= 0 or any(value is None for value in row.values()):
             invalid += 1
             continue
         rows.append({"seconds": seconds, **row})
