@@ -50,6 +50,9 @@ def main():
                 "paired-wave-map-runs.patch",
                 "paired-wave-placed-uav.patch",
                 "paired-wave-present-capture.patch",
+                "paired-wave-graphics-priority.patch",
+                "paired-wave-dropped-scene-draws.patch",
+                "paired-wave-native-upscaler.patch",
                 "paired-wave-remap-timing.patch",
             ):
                 run(["git", "apply", str(own / "patches" / patch)], target)

@@ -1,0 +1,80 @@
+--- a/crates/victory-gpu/src/draw.rs
++++ b/crates/victory-gpu/src/draw.rs
+@@ -2835,6 +2835,18 @@
+         made
+     }
+ 
++    /// Records which scene resources a skipped graphics draw would have written.
++    #[cfg(feature = "diagnostics")]
++    fn trace_dropped_draw(&self, list: &HostList, kind: &str) {
++        list.note_op(|| {
++            let shaders = crate::pipeline::shader_labels(self.pipeline as This);
++            format!(
++                "DROPPED {kind} pipeline {:#x} shaders {shaders:?} targets {:x?}",
++                self.pipeline, self.targets,
++            )
++        });
++    }
++
+     /// The first draws, at debug level: what they bind and read
+     /// (diagnostics builds).
+     #[cfg(feature = "diagnostics")]
+@@ -2939,7 +2951,10 @@
+         if !ran {
+             DROPPED.fetch_add(1, Ordering::Relaxed);
+             #[cfg(feature = "diagnostics")]
+-            dropped(self.pipeline);
++            {
++                self.trace_dropped_draw(list, "draw");
++                dropped(self.pipeline);
++            }
+         }
+     }
+ 
+@@ -3043,7 +3058,10 @@
+         if !ran {
+             DROPPED.fetch_add(1, Ordering::Relaxed);
+             #[cfg(feature = "diagnostics")]
+-            dropped(self.pipeline);
++            {
++                self.trace_dropped_draw(list, "draw");
++                dropped(self.pipeline);
++            }
+         }
+     }
+ }
+@@ -3088,7 +3106,12 @@
+         let why = |_: &str| {};
+         let Some(p) = crate::pipeline::host_pipeline(self.pipeline as This) else {
+             #[cfg(feature = "diagnostics")]
+-            crate::pipeline::note_drop(self.pipeline as This);
++            {
++                if kind != DISPATCH {
++                    self.trace_dropped_draw(list, "indirect draw");
++                }
++                crate::pipeline::note_drop(self.pipeline as This);
++            }
+             return false;
+         };
+         // Indirect rectangles (the title's tiled lighting, 256
+--- a/crates/victory-gpu/src/pipeline.rs
++++ b/crates/victory-gpu/src/pipeline.rs
+@@ -541,6 +541,18 @@
+ #[cfg(all(windows, feature = "diagnostics"))]
+ pub(crate) fn is_skipped(this: This) -> bool {
+     !this.is_null() && skipped_shader(pipeline(this)).is_some()
++}
++
++#[cfg(all(windows, feature = "diagnostics"))]
++pub(crate) fn shader_labels(this: This) -> Vec<String> {
++    if this.is_null() {
++        return Vec::new();
++    }
++    pipeline(this)
++        .shaders
++        .iter()
++        .map(|s| format!("{} {}", s.stage, s.hash))
++        .collect()
+ }
+ 
+ /// Counts a draw or dispatch of `this` intentionally skipped or dropped

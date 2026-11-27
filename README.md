@@ -184,6 +184,16 @@ so it can be matched with the frame's operations. Set `VICTORY_CAPTURE_FRAMES`
 to select specific frames, or `VICTORY_CAPTURE_WORLD_ALSO=0,1` to capture
 the first two world frames too.
 
+The operation trace also identifies the target addresses and shader hashes
+of graphics draws dropped for missing host pipelines. Requested vertex
+graphics pipelines get priority over mesh and compute during compilation,
+using [VItoriaBr commit 8cb509b](https://github.com/uiliannn/VItoriaBr/commit/8cb509bc09f411049bca57e34ffd277aee0ed357).
+
+Set `VICTORY_NATIVE_UPSCALER=1` to try the title's built-in upscaler when
+the FidelityFX path fails. The opt-in checks the picker signature before
+changing the in-memory image. It uses the native mode documented in
+[VIctory-7900XTX commit e151e71](https://github.com/avatarmanz/VIctory-7900XTX/commit/e151e71fa09faf4525771f71869c03a4e89b68b1).
+
 With `VICTORY_FRAME_LOG=1`, long-frame logs split remapping into system
 unmap, map, commit and bookkeeping time using
 [fxceless commit d8986cd](https://github.com/fxceless/victory-fork/commit/d8986cd7b8392f85478f5675933c59712519e163). Compare those counters with texture
