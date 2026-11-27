@@ -1,0 +1,36 @@
+name: AI1 actual owned shadow handback receipt
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai1_shadow_handback_receipt.rs'
+      - 'tools/validate_ai1_shadow_handback_receipt.py'
+      - '.github/workflows/ai1-shadow-handback-receipt.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-handback-receipt:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-shadow-handback-receipt'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_shadow_handback_receipt.py
+      - name: Exercise actual normal and wide shadow handback
+        run: python tools/validate_ai1_shadow_handback_receipt.py
