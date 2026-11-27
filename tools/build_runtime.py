@@ -83,6 +83,7 @@ def validate_paired(target, *, keep_going=False):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_DIFF=mode, VICTORY_MAP_RUNS=mode)
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
+    suite("victory-hle", "software_page_tests")
     suite("victory-gpu", "mapping_tests")
     suite("victory-gpu", "perf_hotpath_coverage_tests")
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
