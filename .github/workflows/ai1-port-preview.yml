@@ -57,12 +57,28 @@ jobs:
           def git(*args):
               return subprocess.check_output(["git", "-C", str(target), *args])
           assert git("rev-parse", "HEAD").decode().strip() == "51700c6d43a3507fa65e50fe4bb64074ce706cd4"
+          def untracked():
+              # Existing preparation can create new source files. Compare
+              # their identities AND bytes, rather than assuming none exist.
+              names = git("ls-files", "-z", "--others", "--exclude-standard").split(b"\0")
+              result = {}
+              for raw in filter(None, names):
+                  name = os.fsdecode(raw)
+                  path = target / name
+                  if path.is_symlink():
+                      result[name] = ("symlink", os.readlink(path))
+                  else:
+                      assert path.resolve(strict=True).is_relative_to(target.resolve())
+                      assert path.is_file(), "unexpected untracked file type"
+                      result[name] = ("file", path.stat().st_mode, path.read_bytes())
+              return result
           def snapshot():
               return (git("status", "--porcelain=v1", "--untracked-files=all"),
                       git("diff", "--binary", "HEAD"),
+                      untracked(),
                       (target/shadow).read_bytes(), (target/texture).read_bytes())
           before = snapshot()
-          assert not git("ls-files", "--others", "--exclude-standard")
+          print("prepared untracked inventory=" + json.dumps(sorted(before[2])), flush=True)
           for c,d,s in itertools.product((False,True),repeat=3):
               args = [sys.executable,"tools/preview_ai1_port_contract.py",str(target)]
               args += [flag for enabled,flag in zip((c,d,s),
