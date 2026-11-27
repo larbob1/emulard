@@ -36,6 +36,9 @@ def validate_paired(target):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS=runs)
         subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
         subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping"], cwd=target, env=env, check=True)
+    for mode in ("0", "1"):
+        env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_DIFF=mode, VICTORY_MAP_RUNS=mode)
+        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "tile_replay_checks"], cwd=target, env=env, check=True)
     run(["cargo", "test", "--locked", "-p", "victory-hle", "perf6_worker_tests"], target)
     run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_tests"], target)
     run(["cargo", "test", "--locked", "-p", "victory-gpu", "perf4_tests"], target)
@@ -94,6 +97,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_gpu_copy_perf.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_pipeline_perf.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_disk_worker_perf.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_paired_tile_replay.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)

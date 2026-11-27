@@ -15,7 +15,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P05 | 2 | Open | Full placeholder interval tracking and coalescing/splitting optimization; demonstrate fewer host calls on captured workloads. |
 | P06 | 2 | Open | Transactional mapper failure recovery, checked map/unmap results, rollback or documented failure semantics; fault-injection tests. |
 | P07 | 2 | Open | Batch changed scatter operations without changing ordering, duplicate-address behavior, or failure semantics. |
-| P08 | 2 | Open | Port captured tile mapping replay and backing-view comparison to paired-wave runtime; exercise partial and overlapping aliases. |
+| P08 | 2 | Candidate | Ported existing diagnostic trace and stable-backing tile replay fixture to paired-wave; validate runtime fixture with flags off/on, captured replay and partial/overlapping aliases. |
 | P09 | 3 | Prototype | Range-aware locking: migrate audited runtime writers and readers to scoped gates; protect complete views reconstructed by unmap, handle alias invalidation and lock ordering. Prototype in probes/range_gate.rs only. |
 | P10 | 3 | Open | Lifetime-pinned backing views with section identity/generation and retirement; no stale handle reuse or memory lifetime violations. |
 | P11 | 3 | Candidate | Validate bounded texture snapshots and generation retries; measure lock wait vs added copy cost, stale snapshot behavior and starvation. Retain original path. |
@@ -65,3 +65,7 @@ actual test results and benchmarks before closing items.
   and reports sanitized patch names and failure categories. No gameplay benchmark is recorded.
 
 - Runtime CI run [45935947236](https://github.com/larbob1/emulard/actions/runs/45935947236) failed during pinned source preparation with a patch context mismatch. A local minimal Git fixture reproduced the same failure applying CRLF patch text to LF source. Normalize patch line endings, enforce LF patch checkout, and retain strict context checks; the next CI run must confirm the actual runtime failure is resolved. P01 and P24 remain open.
+
+## Deferred resolution work
+
+P08: ported the existing tile replay fixture and optional local mapping trace to paired-wave. Test calls run with mapping flags off and on. Trace files contain virtual addresses and are local-only; do not upload them. Actual compiled replay and captured title validation are still pending. No IDs closed.
