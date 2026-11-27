@@ -46,6 +46,40 @@ class ValidationPlanTests(unittest.TestCase):
                     test_suite(Path("."), "victory-hle", name, expected=expected, ignored=True)
             run.assert_not_called()
 
+    def test_storage_selector_plan(self):
+        with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
+            validate_paired(Path("."))
+        selectors = [c for c in suite.call_args_list if c.args[1:3] == ("victory-hle", "storage_selector_native_")]
+        self.assertEqual(len(selectors), 1)
+        self.assertEqual(selectors[0].kwargs["expected"], 2)
+        self.assertFalse(selectors[0].kwargs["ignored"])
+        self.assertEqual(selectors[0].kwargs["env"]["VICTORY_STORAGE_SINGLE_PASS"], "0")
+        workers = [c for c in suite.call_args_list if c.args[1:3] == ("victory-hle", "perf6_worker_tests")]
+        self.assertEqual(len(workers), 3)
+        self.assertEqual([c.kwargs["env"]["VICTORY_STORAGE_SINGLE_PASS"] for c in workers[1:]], ["0", "1"])
+        self.assertTrue(all(c.kwargs["expected"] == 1 for c in workers[1:]))
+        self.assertEqual(run.call_count, 2)
+
+    def test_selector_exact_count_no_timing(self):
+        from build_runtime import test_suite
+        for output, ok in (("test result: ok. 2 passed; 0 failed; 1 ignored;", True),
+                           ("test result: ok. 0 passed; 0 failed;", False),
+                           ("test result: ok. 1 passed; 0 failed;", False),
+                           ("test result: ok. 3 passed; 0 failed;", False),
+                           ("test result: ok. 2 passed; 0 failed;\ntest result: ok. 0 passed; 0 failed;", False)):
+            with self.subTest(output=output), patch("build_runtime.subprocess.run") as run:
+                run.return_value.stdout = output
+                if ok:
+                    test_suite(Path("."), "victory-hle", "storage_selector_native_", expected=2)
+                else:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        test_suite(Path("."), "victory-hle", "storage_selector_native_", expected=2)
+                self.assertNotIn("--ignored", run.call_args.args[0])
+        with patch("build_runtime.subprocess.run") as run:
+            with self.assertRaises(ValueError):
+                test_suite(Path("."), "victory-hle", "storage_selector_native_timing", expected=1, ignored=True)
+            run.assert_not_called()
+
     def test_default_fails_fast(self):
         with patch("build_runtime.test_suite", side_effect=subprocess.CalledProcessError(1, ["test"])) as suite, patch("build_runtime.run") as run:
             with self.assertRaises(subprocess.CalledProcessError):
