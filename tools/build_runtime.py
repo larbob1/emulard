@@ -40,7 +40,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
     command.append(suite)
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_PIPELINE_PRUNE_EARLY", "VICTORY_MESH_LINK_SINGLEFLIGHT", "VICTORY_STAGING_NEAR_SIZE")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -99,6 +99,12 @@ def validate_paired(target, *, keep_going=False):
             suite("victory-gpu", name, env=env)
     for name in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
         suite("victory-gpu", name)
+    for name in ("shader_cache_publication_failure_keeps_runtime_translation", "shader_identity_preserves_stage_and_same_stage_sharing", "wait_budget_order_tests", "queue_promotion_tests", "linked_pair_singleflight_tests", "staging_near_size_tests", "pipeline_stream_rejects", "pipeline_stream_reads_unaligned_bytecode_and_preserves_unknown_stop", "streams_yield_their_shaders"):
+        suite("victory-gpu", name)
+    # Fresh processes isolate cached experiment flags, including mixed modes.
+    for sparse, avx in (("0", "0"), ("1", "0"), ("0", "1"), ("1", "1")):
+        env = dict(os.environ, VICTORY_BACK_SPARSE_MERGE=sparse, VICTORY_BACK_AVX2=avx)
+        suite("victory-gpu", "copy_back_mask_tests", env=env)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
