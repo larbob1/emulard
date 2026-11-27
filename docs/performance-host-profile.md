@@ -31,7 +31,8 @@ new dependencies or runtime flags are required. Use a separate terminal.
   waiting for GPU, locks, I/O or other processes; this does not prove which.
 - Hottest stable thread is sampled only for threads observed at both endpoints
   with the same birth identity. Thread churn, non-atomic reads and scheduling
-  granularity limit accuracy; values may slightly exceed one because endpoints
+  granularity limit accuracy. The report distinguishes available stable-thread
+  metrics from identical thread sets at both endpoints. Values may slightly exceed one because endpoints
   differ. Do not infer CPU critical path or contention from a busy thread alone.
 - RSS is sampled resident memory including shared pages, not unique physical
   allocation, GPU memory, or a peak between samples.
@@ -48,5 +49,6 @@ Exit 0 = all requested intervals collected, 1 = invalid configuration, 2 =
 partial or unavailable observation. No PID, thread ID, path or process name is
 exported. A process with the same PID and same start tick is theoretically
 indistinguishable; the identity check is best effort, not a kernel pidfd.
-Synthetic tests cover parser and sampling arithmetic; actual Proton measurements
+Synthetic tests cover parser and sampling arithmetic; a Linux-only smoke test samples
+its own Python process through real /proc. Actual Proton measurements
 are still required. Do not upload raw logs, proprietary content or profiles.

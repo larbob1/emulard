@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-import copy
+import os
+import sys
 import json
 from pathlib import Path
 import tempfile
@@ -47,9 +48,9 @@ class HostProfileTests(unittest.TestCase):
             (proc / "stat").write_text(stat())
             (task / "stat").write_text(stat())
             (proc / "task" / "789").mkdir()
-            times = iter((100, 300))
+            times = iter((100, 120, 300))
             r = read_snapshot(root, 123, lambda: next(times))
-            self.assertEqual(r["time_ns"], 200)
+            self.assertEqual(r["time_ns"], 110)
             self.assertEqual(r["read_ns"], 200)
             self.assertIsNone(r["io"])
             self.assertTrue(r["threads_incomplete"])
@@ -82,6 +83,16 @@ class HostProfileTests(unittest.TestCase):
         r = interval(a, b, 100, 4096)
         self.assertEqual(r["stable_threads"], 0)
         self.assertIsNone(r["hottest_stable_thread_core_equivalents"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real /proc requires Linux")
+    def test_live_own_process(self):
+        result = sample(os.getpid(), 1, 0.25)
+        self.assertTrue(result["complete"], result)
+        self.assertGreater(result["elapsed_seconds"], 0)
+        self.assertGreater(result["peak_sampled_rss_bytes"], 0)
+        self.assertGreaterEqual(result["mean_cpu_core_equivalents"], 0)
+        self.assertGreaterEqual(result["intervals"][0]["stable_threads"], 1)
+        self.assertNotIn("birth", json.dumps(result))
 
     def test_elapsed_weighted_rates(self):
         a, b, c = snap(), snap(1_000_000_000, 200), snap(4_000_000_000, 800)

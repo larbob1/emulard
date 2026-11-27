@@ -44,6 +44,7 @@ def read_snapshot(root, pid, clock=time.monotonic_ns):
     proc = root / str(pid)
     before = clock()
     birth, ticks, rss = parse_stat((proc / "stat").read_text(errors="replace"))
+    stat_after = clock()
     io = None
     try:
         io = parse_io((proc / "io").read_text(errors="replace"))
@@ -74,7 +75,7 @@ def read_snapshot(root, pid, clock=time.monotonic_ns):
         raise ValueError("process identity changed")
     return {"birth": birth, "ticks": ticks, "rss_pages": rss, "io": io,
             "threads": threads, "threads_incomplete": incomplete,
-            "time_ns": (before + after) // 2, "read_ns": after - before}
+            "time_ns": (before + stat_after) // 2, "read_ns": after - before}
 
 
 def interval(a, b, hz, page_size):
@@ -106,7 +107,9 @@ def interval(a, b, hz, page_size):
         "stable_threads": len(stable),
         "thread_count_start_observed": len(a["threads"]),
         "thread_count_end_observed": len(b["threads"]),
-        "thread_observations_complete": thread_valid,
+        "stable_thread_metrics_available": thread_valid,
+        "thread_endpoint_sets_match": (not a["threads_incomplete"] and not b["threads_incomplete"]
+                                       and set(a["threads"]) == set(b["threads"])),
         "hottest_stable_thread_core_equivalents": (
             max(thread_deltas) / hz / seconds if thread_valid else None),
         "snapshot_read_seconds_max": max(a["read_ns"], b["read_ns"]) / NS,
@@ -118,7 +121,7 @@ def summarize(rows, requested, stop_reason=None):
     cpu = sum(r["cpu_seconds"] for r in rows)
     io_rows = [r for r in rows if r["read_bytes"] is not None]
     io_seconds = sum(r["elapsed_seconds"] for r in io_rows)
-    thread_rows = [r for r in rows if r["thread_observations_complete"]]
+    thread_rows = [r for r in rows if r["stable_thread_metrics_available"]]
     return {
         "requested_intervals": requested,
         "completed_intervals": len(rows),
