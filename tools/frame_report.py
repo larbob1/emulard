@@ -79,6 +79,7 @@ COUNTERS = {
     "unchanged physical mapping requests skipped": ("count",),
     "mapping diff run totals": ("runs", "pages"),
     "texture view estimate hits": ("hits",),
+    "alias direct run totals": ("attempts", "hits"),
 }
 def update_counters(latest, line):
     for message, fields in COUNTERS.items():

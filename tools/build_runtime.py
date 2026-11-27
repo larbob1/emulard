@@ -40,7 +40,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
     command.append(suite)
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -84,6 +84,14 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
     suite("victory-gpu", "mapping_tests")
+    suite("victory-gpu", "perf_hotpath_coverage_tests")
+    env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
+    suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+    suite("victory-hle", "tile_replay_checks", env=env)
+    env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="1", VICTORY_MAP_DIFF_RUNS="1", VICTORY_MAP_ALIAS_DIRECT="1")
+    suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+    suite("victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
+    suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-gpu", "perf4_tests")
     for enabled in ("0", "1"):
         env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
@@ -147,6 +155,8 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_paired_tile_replay.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_checked_unmap.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_preflight.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)

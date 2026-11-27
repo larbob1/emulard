@@ -104,6 +104,10 @@ class FrameReportTests(unittest.TestCase):
         self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)
         self.assertEqual(result["latest_cumulative_counters"]["texture view estimate hits"]["hits"], 8)
 
+    def test_alias_direct_counters(self):
+        result = summarize(["alias direct run totals attempts=2 hits=1", "alias direct run totals attempts=4 hits=3"])
+        self.assertEqual(result["latest_cumulative_counters"]["alias direct run totals"], {"attempts": 4, "hits": 3})
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

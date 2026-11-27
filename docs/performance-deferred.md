@@ -8,7 +8,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 
 | ID | Origin | Status | Outstanding work / acceptance evidence |
 | --- | --- | --- | --- |
-| P01 | 1 | Candidate | All 21 selected Windows suite invocations and both build profiles passed at 8956a8e. Newer preflight revision and Proton gameplay, native/Proton comparisons and additional failure fixtures remain open. |
+| P01 | 1 | Candidate | All 21 selected Windows suite invocations and both build profiles passed at 8956a8e. User reports Proton gameplay at 2–3 FPS; exact commit/flags and reproducible logs not supplied. Newer integrated runtime, matched native/Proton comparisons and additional failure fixtures remain open. |
 | P02 | 1 | Candidate | Local repeat-pair numeric benchmark aggregator added. Actual matched gameplay runs, CPU/GPU utilization, frame-level tails and native Windows versus Proton comparison remain open. |
 | P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters and actual rounded individual frame distributions from detailed frame batches. Critical-path attribution and real workload verification remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
@@ -31,7 +31,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P21 | 4 | Candidate | Independent Linux CI compiled the actual prepared scalar/AVX2, sparse merge and idle budget helpers; five tests passed in each of two switch modes. Runtime mask paths, GPU integration, CPU/RAM/transfer telemetry and real benchmarks remain open. |
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
 | P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
-| P24 | 6 | Candidate | Prior Windows split/restore and partial-source regression failures resolved at 8956a8e; complete Windows validation passed. Newer preflight and isolated hot-path runtime CI remain pending; do not close until current integration is verified. |
+| P24 | 6 | Candidate | Prior Windows split/restore and partial-source regression failures resolved at 8956a8e; complete Windows validation passed. Isolated hot-path Windows CI also passed; combined current integration and newer preflight verification remain open. |
 
 ## Current state
 
@@ -117,3 +117,9 @@ P06: checked unmap candidate preserves the HLE view index on host unmap refusal,
 
 - [Windows CI 45937702602](https://github.com/larbob1/emulard/actions/runs/45937702602) at `8956a8e3a3f847a2e7959ac17623debc11a1da6c` passed all 21 selected suite invocations (including all four physical-page modes, concurrent reads and tile replay) and both release/diagnostic builds. This verifies the earlier partial-source correction in the tested native Windows suites, not Proton gameplay. Use this exact revision for the first controlled playtest after smoke checks. [Newer preflight runtime CI](https://github.com/larbob1/emulard/actions/runs/45938913428) and hot-path native validation remain separate. No item closed; all 24 IDs retained.
 - P02/P03/P20: report now supports `--target-fps 30`, approximate present rate derived from rounded individual durations, independent sample counts, and the new hot-path counters. Default target remains 10 for backward compatibility. A present is not proof of a correctly displayed frame; operator visual checks and repeated runs remain required. New report tests are pending CI.
+
+### Proton baseline and mapping hot-path integration
+
+- Project owner reports actual Proton gameplay at approximately 2–3 FPS. Exact runtime revision, settings, scene, duration, visual correctness and raw measurements were not supplied; treat this as an operator-reported baseline, not formal 30 FPS acceptance. Target is approximately 10–15x improvement.
+- [Hot-path Windows CI 45938587772](https://github.com/larbob1/emulard/actions/runs/45938587772) at `2871877b1e30a6c41882c6e577aa53fac0469365` passed all 24 selected suite invocations and both build profiles, including changed-run and coverage fixtures. Ported its opt-in changes to the cumulative branch without merging the old branch's other files. Combined current-head tests are pending.
+- P05/P08: new independent `VICTORY_MAP_ALIAS_DIRECT=1` experiment (requires `VICTORY_MAP_RUNS=1` and a multi-page changed run on the alias-run path) first tries normal contiguous mapping before per-page splitting/coalescing. Falls back to existing map_run on refusal. Counters record logical attempts and hits, not host syscall counts. This can cost an extra attempt if the range is fragmented; compare matched workloads, never enable as default without measurement. Existing map failure cleanup remains nontransactional. Native tests pending. Full interval tracking and P07 changed-scatter batching remain open.
