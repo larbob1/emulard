@@ -40,3 +40,6 @@ PR #21 39a481d, opt-in lookup optimization, native pending; synthetic pending. A
 
 ## Coordinator handoff — native graphics validation
 PR #22 b183b12 validates frozen #14/#17 snapshots independently; CI synthetic pending, native active. Scatter #16 native passed 29 suites + both builds. #18 unchanged; no source branches merged. Next: review native outcomes and obtain matched Proton measurements. All IDs open.
+
+## Replacement coordinator handoff
+P05 #25 7f7db1e synthetic passed 115 Python +4 range +6 hint +10 portable copy executions, native deferred; P21/P24 #23 c074896b synthetic passed 135 Python +4 standalone +10 portable copy executions, native active. #18/#19/#10/#21/#22 native passed (see STATUS for counts/links). #18 frozen, no merge. AI2 contract posted #12, AI3 review posted #13; all production synchronization restricted pending writer/lease/lock-order review. Next: finish #23, schedule #25 native, review exact P10 backing consumers and P12 writer publication, obtain owner matched Proton test from #18 before stacking more unmeasured candidates. All 24 IDs open; performance unmeasured.
