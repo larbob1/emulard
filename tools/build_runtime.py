@@ -16,6 +16,14 @@ PATCHER = Path(__file__).resolve().with_name("apply_memory_patch.py")
 def run(args, cwd=None):
     subprocess.run(args, cwd=cwd, check=True)
 
+def apply_patch(path, target):
+    # Windows can check out patch files as CRLF, while upstream enforces LF.
+    # Normalize line endings only; retain exact context validation.
+    print(f"Applying patch: {path.name}", flush=True)
+    payload = path.read_bytes().replace(b"\r\n", b"\n")
+    subprocess.run(["git", "apply", "--check", "-"], cwd=target, input=payload, check=True)
+    subprocess.run(["git", "apply", "-"], cwd=target, input=payload, check=True)
+
 def build_binaries(target):
     run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
     run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
@@ -57,7 +65,7 @@ def main():
     if ns.build and os.name != "nt":
         ap.error("The reviewed runtime currently requires a Windows build host.")
     try:
-        run(["git", "clone", "--no-checkout", UPSTREAM, str(target)])
+        run(["git", "clone", "--no-checkout", "--config", "core.autocrlf=false", UPSTREAM, str(target)])
         run(["git", "remote", "set-url", "--push", "origin", "DISABLED"], target)
         if ns.paired_wave_refresh:
             run(["git", "fetch", "--no-tags", "origin", PAIRED_WAVE_REFRESH], target)
@@ -77,9 +85,9 @@ def main():
                 "paired-wave-remap-timing.patch",
                 "paired-wave-wine-placeholder-reuse.patch",
             ):
-                run(["git", "apply", str(own / "patches" / patch)], target)
+                apply_patch(own / "patches" / patch, target)
             run([sys.executable, str(PATCHER.with_name("apply_pipeline_stack_patch.py")), str(target), "--apply"])
-            run(["git", "apply", str(own / "patches" / "paired-wave-worker-tracing.patch")], target)
+            apply_patch(own / "patches" / "paired-wave-worker-tracing.patch", target)
             run([sys.executable, str(PATCHER.with_name("apply_mapping_fastpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_diff.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_texture_snapshot.py")), str(target)])
@@ -108,7 +116,7 @@ def main():
                 "texture-view-coverage.patch",
                 "reuse-vacant-page-placeholders.patch",
             ):
-                run(["git", "apply", str(own / "patches" / patch)], target)
+                apply_patch(own / "patches" / patch, target)
             run(["git", "diff", "--check"], target)
             if ns.build:
                 run(["cargo", "test", "--locked", "-p", "victory-hle", "tile_replay_checks"], target)
@@ -137,20 +145,20 @@ def main():
         run(heap, target)
         run([sys.executable, str(PATCHER.with_name("apply_relative_patch.py")), str(target), "--apply"])
         run([sys.executable, str(PATCHER.with_name("apply_iterative_bool_patch.py")), str(target), "--apply"])
-        run(["git", "apply", str(own / "patches" / "predicate-iterative.patch")], target)
+        apply_patch(own / "patches" / "predicate-iterative.patch", target)
         run([sys.executable, str(PATCHER.with_name("apply_divergent_wave_retry_patch.py")), str(target), "--apply"])
-        run(["git", "apply", str(own / "patches" / "presentx-multiplane.patch")], target)
-        run(["git", "apply", str(own / "patches" / "array-lod.patch")], target)
-        run(["git", "apply", str(own / "patches" / "signature-interpolation.patch")], target)
-        run(["git", "apply", str(own / "patches" / "indexed-buffer-descriptors.patch")], target)
+        apply_patch(own / "patches" / "presentx-multiplane.patch", target)
+        apply_patch(own / "patches" / "array-lod.patch", target)
+        apply_patch(own / "patches" / "signature-interpolation.patch", target)
+        apply_patch(own / "patches" / "indexed-buffer-descriptors.patch", target)
         # Belobug 8629211 and fxceless 8dd30ab, adapted to the pinned runtime.
-        run(["git", "apply", str(own / "patches" / "belobug-integer-blend.patch")], target)
-        run(["git", "apply", str(own / "patches" / "fxceless-shared-exponent-target.patch")], target)
-        run(["git", "apply", str(own / "patches" / "wine-disk-backed-memory.patch")], target)
-        run(["git", "apply", str(own / "patches" / "wine-reuse-page-placeholders.patch")], target)
-        run(["git", "apply", str(own / "patches" / "belobug-wave32-tiled-shadows.patch")], target)
-        run(["git", "apply", str(own / "patches" / "pipeline-isolation.patch")], target)
-        run(["git", "apply", str(own / "patches" / "pipeline-worker-tracing.patch")], target)
+        apply_patch(own / "patches" / "belobug-integer-blend.patch", target)
+        apply_patch(own / "patches" / "fxceless-shared-exponent-target.patch", target)
+        apply_patch(own / "patches" / "wine-disk-backed-memory.patch", target)
+        apply_patch(own / "patches" / "wine-reuse-page-placeholders.patch", target)
+        apply_patch(own / "patches" / "belobug-wave32-tiled-shadows.patch", target)
+        apply_patch(own / "patches" / "pipeline-isolation.patch", target)
+        apply_patch(own / "patches" / "pipeline-worker-tracing.patch", target)
         run(["git", "diff", "--check"], target)
         if ns.build:
             if ns.lighting_memory:

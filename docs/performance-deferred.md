@@ -63,3 +63,5 @@ actual test results and benchmarks before closing items.
   [run](https://github.com/larbob1/emulard/actions/runs/45935865574) failed in the combined preparation/build stage (exit 1, no specific Rust
   diagnostics). Phase 6 subsequently separates preparation from compilation
   and reports sanitized patch names and failure categories. No gameplay benchmark is recorded.
+
+- Runtime CI run [45935947236](https://github.com/larbob1/emulard/actions/runs/45935947236) failed during pinned source preparation with a patch context mismatch. A local minimal Git fixture reproduced the same failure applying CRLF patch text to LF source. Normalize patch line endings, enforce LF patch checkout, and retain strict context checks; the next CI run must confirm the actual runtime failure is resolved. P01 and P24 remain open.

@@ -24,6 +24,8 @@ def run_stage(label, args, cwd):
             unresolved = set()
             locations = set()
             patches = set()
+            last_patch = None
+            patch_locations = set()
             categories = set()
             for line in output:
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
@@ -33,6 +35,12 @@ def run_stage(label, args, cwd):
                 if location:
                     locations.add(b":".join(location.groups()).replace(b"\\", b"/"))
                 if label == "Pinned source preparation":
+                    applied = re.fullmatch(rb"Applying patch: ([a-z0-9][a-z0-9-]+\.patch)\s*", line)
+                    if applied:
+                        last_patch = applied[1].decode("ascii")
+                    failed = re.search(rb"patch failed: ((?:crates|apps)/[A-Za-z0-9_./-]+\.rs):([0-9]+)", line)
+                    if failed:
+                        patch_locations.add(b":".join(failed.groups()).decode("ascii"))
                     for name in re.findall(rb"apply_[a-z_]+\.py", line):
                         preparation.add(name.decode("ascii"))
                     for name in re.findall(rb"[a-z0-9][a-z0-9-]+\.patch", line):
@@ -50,6 +58,10 @@ def run_stage(label, args, cwd):
                     ):
                         if phrase in line.lower():
                             categories.add(category)
+            if last_patch:
+                print("Last patch attempted: " + last_patch)
+            if patch_locations:
+                print("Patch context locations: " + ", ".join(sorted(patch_locations)))
             if categories:
                 print("Preparation failure categories: " + ", ".join(sorted(categories)))
             if patches:
