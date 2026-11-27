@@ -86,6 +86,7 @@ def validate_paired(target, *, keep_going=False):
     suite("victory-hle", "software_page_tests")
     suite("victory-hle", "pinned_view_tests")
     env = dict(os.environ, VICTORY_MAP_PINNED_MIRROR="1", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="1", VICTORY_MAP_DIFF_RUNS="1")
+    suite("victory-hle", "pinned_backing_reads_survive_alias_replacement_and_retirement", env=env)
     suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
     suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-gpu", "mapping_tests")

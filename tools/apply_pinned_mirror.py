@@ -33,13 +33,17 @@ def main():
     args = parser.parse_args()
     path = args.checkout / PATH
     module = path.with_name("xmem_pinned_views.rs")
+    fixture = path.with_name("xmem_pinned_backing_tests.rs")
     try:
-        if module.exists():
+        if module.exists() or fixture.exists():
             raise ValueError("Pinned mirror already installed")
         new_source = transform(path.read_text(encoding="utf-8"))
         helper = (Path(__file__).resolve().parents[1] / "probes" / "pinned_views.rs").read_text(encoding="utf-8")
+        fixture_source = Path(__file__).resolve().with_name("pinned_backing_tests.rs").read_text(encoding="utf-8")
+        new_source += '\n#[cfg(test)]\n#[path = "xmem_pinned_backing_tests.rs"]\nmod pinned_backing_tests;\n'
         path.write_text(new_source, encoding="utf-8")
         module.write_text(helper, encoding="utf-8")
+        fixture.write_text(fixture_source, encoding="utf-8")
     except (OSError, ValueError) as exc:
         parser.exit(1, f"Pinned mirror preparation failed: {exc}\n")
     return 0

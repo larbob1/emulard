@@ -23,3 +23,7 @@ read-only GPU consumer a synchronized backing read, and test retirement
 against GPU fences. Direct CPU accesses, GPU writes, external frees and
 ownership must be audited before eliminating any host mappings. P04/P10
 remain open.
+
+## Native backing-read fixture
+
+A test-only reader opens read-only section views directly from pinned plans, with an 8 MiB bound and all-or-nothing output. Tests scattered page boundaries, replacement of a title alias, unmap/free of all original page IDs, old-plan reads after retirement, and final Arc release. This uses fixture-owned already-committed memory with no concurrent writers. Production read permissions, live GPU/CPU writes, GPU fence completion, mapping lifetime, and consumer integration remain unproven. It deliberately does not add a production read callback or enable a new runtime flag. Native CI pending.
