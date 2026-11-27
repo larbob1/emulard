@@ -1,0 +1,67 @@
+name: Prepared diagnostic preview review
+
+on:
+  push:
+    branches: ['dev/performance-phase6-diagnostic-preview-check']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: dirty
+            source: c074896b1bfd87def17c91c901bf0e9ccf56263f
+            proposal: 41e4cbf5122bef921d42e46a07a0ce8e2b19c772
+            script: propose_dirty_observation.py
+          - name: cpu
+            source: dbac4c6ea21d9580f5b0bd39ba2b9d6c4eb6f2b1
+            proposal: e029744d4e76647a657227579d1d18a0f5eb5ab0
+            script: propose_cpu_trace_hooks.py
+    name: Prepared preview (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.source }}
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.proposal }}
+          path: proposal
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare exact pinned source and verify read-only preview
+        shell: bash
+        env:
+          PREVIEW_SCRIPT: ${{ matrix.script }}
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/review-runtime"
+          if ! python source/tools/build_runtime.py "$runtime" --paired-wave-refresh > "$RUNNER_TEMP/prepare.log" 2>&1; then
+            echo "Pinned source preparation failed"
+            exit 1
+          fi
+          echo "Pinned source prepared"
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/before.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/before.status"
+          if ! python "proposal/tools/$PREVIEW_SCRIPT" "$runtime" > "$RUNNER_TEMP/preview.diff" 2> "$RUNNER_TEMP/preview.err"; then
+            echo "Prepared preview rejected"
+            cat "$RUNNER_TEMP/preview.err"
+            exit 1
+          fi
+          test -s "$RUNNER_TEMP/preview.diff"
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/after.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/after.status"
+          cmp "$RUNNER_TEMP/before.diff" "$RUNNER_TEMP/after.diff"
+          cmp "$RUNNER_TEMP/before.status" "$RUNNER_TEMP/after.status"
+          echo "All exact preview anchors accepted; tracked diff and status unchanged"
+          echo "Preview changed-file headers: $(grep -c '^+++ ' "$RUNNER_TEMP/preview.diff")"
