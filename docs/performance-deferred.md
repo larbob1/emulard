@@ -28,7 +28,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P18 | 6 | Candidate | Opt-in paired-wave DirectStorage worker cap implemented. Descriptor/command list caching, release/PGO evaluation, native Linux backend feasibility and measured worker tuning remain open. |
 | P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Actual compile and end-to-end results, and other runtime variant ports remain open. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
-| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. |
+| P21 | 4 | Candidate | Added independent Linux compile/test job extracting the actual prepared scalar/AVX2, sparse merge and idle budget helpers, with both switch modes. Runtime mask paths, GPU integration, CPU/RAM/transfer telemetry and real benchmarks remain open. |
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
 | P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
 | P24 | 6 | Open | Repair any remaining compile/CI failures; verify the builder anchor fix and all cumulative source patches on pinned checkouts. |
@@ -83,3 +83,5 @@ P01/P24: the cumulative paired-wave test runner now requires at least one passin
 P03: detailed present-to-present frame batches now produce independent p50/p90/p95/p99 and maximum frame times, with count validation and separate warmup exclusion. No runtime measurements are available.
 
 P06: preflight failures now leave existing aligned diff mappings intact, and range overflow is rejected before mutation. This is not transactional host failure recovery. Existing native map/unmap error paths still require a separate audit and fault injection; no closure claimed.
+
+P21: a separate portable-copy CI job prepares the pinned patched renderer and compiles the exact portable helper functions with rustc on Linux. This can verify pure CPU equivalence and idle-budget tests without compiling D3D12 or claiming gameplay correctness. Results pending.
