@@ -72,3 +72,25 @@ driver library availability, but must first establish cache ownership,
 preserve RenderDoc policy, retain dirty state on failed writes, and avoid
 new shared-cache writes without coordinator approval. No such production
 change is included here.
+
+## Early-list-only protocol model
+
+probes/early_list_persistence.rs models an independent early-list save
+when no usable driver library exists. The external owner/policy booleans
+are assumptions, not a real lease or RenderDoc check. A nonblocking save
+gate serializes publications, the state mutex captures a sorted key
+snapshot and consumes its dirty bit, and publication occurs outside that
+mutex. Failed publication restores the dirty bit without erasing any
+later note. Unwinding restores dirty and poisons the model save gate,
+which then refuses further publication. No opaque library operation is
+present. Seven cases exercise denial, retry, interleaved notes on success
+and failure, busy save, duplicate keys and uncertain publication.
+
+This is a model, not a source patch or a filesystem test. Actual runtime
+integration must preserve EARLY_MAX and startup reading, existing
+periodic/forced save semantics and lock order, RenderDoc exclusion,
+directory ownership across startup/rename/save, publication atomicity,
+dirty retry, and independent driver-library bookkeeping. Existing cache
+writes are not authorized by this model. An interleaved callback simulates
+a later note deterministically; it is not throughput or concurrent OS
+evidence. No new runtime flag or title launch.
