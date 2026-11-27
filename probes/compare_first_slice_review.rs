@@ -5,11 +5,11 @@
     #[test]
     fn ai0_parallel_compare_exact_changed_piece_ranges() {
         const PIECE: usize = 64 << 10;
-        const LEN: usize = (32 << 20) + 513;
+        const LEN: usize = (32 << 20) + 2 * PIECE + 513;
         // The resource is only an owned handle for Shadow::new; the
         // comparison reads the privately owned CPU vectors, not the GPU.
         let buffer = warp_buffer().expect("WARP required for this fixture");
-        for (skew, from) in [(PIECE / 2, 0usize), (PIECE - 1, 1),
+        for (skew, from) in [(PIECE / 2, 0usize), (PIECE - 2, 1),
                              (0, 17), (17, PIECE + 3)] {
             let start = (8 * PIECE + skew) as u64;
             let to = LEN;
