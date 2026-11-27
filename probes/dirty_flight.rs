@@ -22,6 +22,24 @@ impl Ticket {
     fn matches(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
 }
 
+/// A model fence identity, independent of the numeric fence value.
+#[derive(Clone)]
+pub struct FenceDomain(Arc<()>);
+impl FenceDomain {
+    pub fn new() -> Self { Self(Arc::new(())) }
+    fn matches(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) }
+}
+
+/// Acknowledgements from the serialized publication owner. A true value
+/// is only a model assertion; production needs actual ordered operations.
+#[derive(Clone, Copy)]
+pub struct Publication {
+    pub handback: bool,
+    pub generations_and_aliases: bool,
+    pub readback_visible: bool,
+    pub ordered_title_signals: bool,
+}
+
 // These are assertions in the model, not evidence from actual shader analysis.
 // Every category is necessary; none can be inferred from a zero bitmap.
 #[derive(Clone, Copy, Default)]
@@ -64,17 +82,18 @@ pub enum Error { NotCompleted, NotPlanned, AlreadyPlanned, AlreadyPublished, Not
 pub struct Flight<T> {
     ticket: Ticket,
     fence: u64,
+    domain: FenceDomain,
     region: Span,
-    // Model-only stand-in for a real retained mapping/backing lease.
+    // Model-only stand-in for an aggregate of real retained backing and descriptor leases.
     pin: Option<Arc<T>>,
     plan: Option<Plan>,
     published: bool,
 }
 
 impl<T> Flight<T> {
-    pub fn new(fence: u64, region: Span, pin: Arc<T>) -> Result<Self, Error> {
-        if fence == 0 { return Err(Error::InvalidFence); }
-        Ok(Self { ticket: Ticket(Arc::new(())), fence, region, pin: Some(pin), plan: None, published: false })
+    pub fn new(domain: FenceDomain, fence: u64, region: Span, pin: Arc<T>) -> Result<Self, Error> {
+        if fence == 0 || fence == u64::MAX { return Err(Error::InvalidFence); }
+        Ok(Self { ticket: Ticket(Arc::new(())), fence, domain, region, pin: Some(pin), plan: None, published: false })
     }
 
     pub fn ticket(&self) -> Ticket { self.ticket.clone() }
@@ -82,9 +101,9 @@ impl<T> Flight<T> {
     // completed_fence must come from the same real queue/fence domain.
     // A device-loss sentinel or failed fence query must be rejected upstream.
     // Missing/wrong/malformed report cannot produce sparse work.
-    pub fn plan(&mut self, completed_fence: u64, report: Option<&Report>) -> Result<&Plan, Error> {
+    pub fn plan(&mut self, domain: &FenceDomain, completed_fence: u64, report: Option<&Report>) -> Result<&Plan, Error> {
         if self.plan.is_some() { return Err(Error::AlreadyPlanned); }
-        if completed_fence == u64::MAX || completed_fence < self.fence {
+        if !self.domain.matches(domain) || completed_fence == u64::MAX || completed_fence < self.fence {
             return Err(Error::NotCompleted);
         }
         self.plan = Some(report.and_then(|r| self.sparse(r)).unwrap_or(Plan::Authoritative));
@@ -122,10 +141,11 @@ impl<T> Flight<T> {
     // Model publication as a single acknowledgement from the external
     // serialized handback/invalidation owner. Actual write, alias and
     // generation publication are not performed here.
-    pub fn publish(&mut self, handback_ok: bool, generation_ok: bool) -> Result<(), Error> {
+    pub fn publish(&mut self, proof: Publication) -> Result<(), Error> {
         if self.plan.is_none() { return Err(Error::NotPlanned); }
         if self.published { return Err(Error::AlreadyPublished); }
-        if !handback_ok || !generation_ok { return Err(Error::PublicationFailed); }
+        if !proof.handback || !proof.generations_and_aliases || !proof.readback_visible
+            || !proof.ordered_title_signals { return Err(Error::PublicationFailed); }
         self.published = true;
         Ok(())
     }
@@ -146,7 +166,15 @@ mod tests {
             backing_identity: true, alias_footprint: true, fault_free: true }
     }
     fn flight(start: u64, len: u64) -> Flight<()> {
-        Flight::new(7, Span::new(start, len).unwrap(), Arc::new(())).unwrap()
+        Flight::new(FenceDomain::new(), 7, Span::new(start, len).unwrap(), Arc::new(())).unwrap()
+    }
+    fn proof(handback: bool, generation: bool) -> Publication {
+        Publication { handback, generations_and_aliases: generation, readback_visible: true, ordered_title_signals: true }
+    }
+    // Helper uses the owning fence domain, except explicit wrong-domain tests.
+    fn plan<'a, T>(f: &'a mut Flight<T>, value: u64, report: Option<&Report>) -> Result<&'a Plan, Error> {
+        let domain = f.domain.clone();
+        f.plan(&domain, value, report)
     }
     fn report(f: &Flight<()>, words: Vec<u64>) -> Report {
         Report { ticket: f.ticket(), fence: 7, coverage: coverage(), words }
@@ -155,7 +183,7 @@ mod tests {
     fn sparse_clips_and_joins_pages() {
         let mut f = flight(17, PAGE * 4 - 34);
         let r = report(&f, vec![0b1011]);
-        assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Sparse(vec![
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Sparse(vec![
             Span::new(17, PAGE * 2 - 17).unwrap(),
             Span::new(PAGE * 3, PAGE - 17).unwrap(),
         ])));
@@ -164,31 +192,59 @@ mod tests {
     fn zero_and_full_masks() {
         let mut f = flight(13, PAGE * 2);
         let r = report(&f, vec![0]);
-        assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Sparse(vec![])));
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Sparse(vec![])));
         let mut f = flight(13, PAGE * 2);
         let r = report(&f, vec![7]);
-        assert_eq!(f.plan(8, Some(&r)), Ok(&Plan::Sparse(vec![Span::new(13, PAGE * 2).unwrap()])));
+        assert_eq!(plan(&mut f, 8, Some(&r)), Ok(&Plan::Sparse(vec![Span::new(13, PAGE * 2).unwrap()])));
     }
     #[test]
     fn no_fence_or_device_loss_cannot_plan() {
         let mut f = flight(0, PAGE);
         let r = report(&f, vec![1]);
         for n in [0, 6, u64::MAX] {
-            assert_eq!(f.plan(n, Some(&r)), Err(Error::NotCompleted));
+            assert_eq!(plan(&mut f, n, Some(&r)), Err(Error::NotCompleted));
         }
-        assert!(f.plan(7, Some(&r)).is_ok());
-        assert_eq!(f.plan(8, Some(&r)), Err(Error::AlreadyPlanned));
+        assert!(plan(&mut f, 7, Some(&r)).is_ok());
+        assert_eq!(plan(&mut f, 8, Some(&r)), Err(Error::AlreadyPlanned));
     }
+    #[test]
+    fn wrong_fence_domain_and_reserved_fence_values_are_rejected() {
+        let mut f = flight(0, PAGE);
+        let r = report(&f, vec![1]);
+        let unrelated = FenceDomain::new();
+        assert_eq!(f.plan(&unrelated, 1000, Some(&r)), Err(Error::NotCompleted));
+        assert!(plan(&mut f, 7, Some(&r)).is_ok());
+        for fence in [0, u64::MAX] {
+            assert!(matches!(Flight::new(FenceDomain::new(), fence, Span::new(0, PAGE).unwrap(), Arc::new(())), Err(Error::InvalidFence)));
+        }
+    }
+
+    #[test]
+    fn readback_and_title_signal_acknowledgements_required() {
+        let mut f = flight(0, PAGE);
+        plan(&mut f, 7, None).unwrap();
+        let mut p = proof(true, true);
+        p.readback_visible = false;
+        assert_eq!(f.publish(p), Err(Error::PublicationFailed));
+        assert_eq!(f.retire(), Err(Error::NotPublished));
+        p.readback_visible = true;
+        p.ordered_title_signals = false;
+        assert_eq!(f.publish(p), Err(Error::PublicationFailed));
+        assert_eq!(f.retire(), Err(Error::NotPublished));
+        assert!(f.publish(proof(true, true)).is_ok());
+        assert!(f.retire().is_ok());
+    }
+
     #[test]
     fn cross_flight_and_wrong_fence_fall_back() {
         let a = flight(0, PAGE);
         let mut b = flight(0, PAGE);
         let r = report(&a, vec![0]);
-        assert_eq!(b.plan(7, Some(&r)), Ok(&Plan::Authoritative));
+        assert_eq!(plan(&mut b, 7, Some(&r)), Ok(&Plan::Authoritative));
         let mut f = flight(0, PAGE);
         let mut r = report(&f, vec![0]);
         r.fence = 8;
-        assert_eq!(f.plan(8, Some(&r)), Ok(&Plan::Authoritative));
+        assert_eq!(plan(&mut f, 8, Some(&r)), Ok(&Plan::Authoritative));
     }
     #[test]
     fn every_coverage_category_is_required() {
@@ -204,42 +260,42 @@ mod tests {
                 5 => r.coverage.alias_footprint = false,
                 _ => r.coverage.fault_free = false,
             }
-            assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Authoritative));
+            assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Authoritative));
         }
         let mut f = flight(0, PAGE);
-        assert_eq!(f.plan(7, None), Ok(&Plan::Authoritative));
+        assert_eq!(plan(&mut f, 7, None), Ok(&Plan::Authoritative));
     }
     #[test]
     fn malformed_bitmaps_and_capacity_fall_back() {
         for words in [vec![], vec![0, 0], vec![4], vec![u64::MAX]] {
             let mut f = flight(0, PAGE * 2);
             let r = report(&f, words);
-            assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Authoritative));
+            assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Authoritative));
         }
         let mut f = flight(0, PAGE * (MAX_PAGES + 1));
         let r = report(&f, vec![0; 65]);
-        assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Authoritative));
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Authoritative));
         assert!(Span::new(u64::MAX, 1).is_none());
         assert!(Span::new(0, 0).is_none());
         let mut f = flight(u64::MAX - 32, 32);
         let r = report(&f, vec![1]);
-        assert_eq!(f.plan(7, Some(&r)), Ok(&Plan::Sparse(vec![Span::new(u64::MAX - 32, 32).unwrap()])));
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Sparse(vec![Span::new(u64::MAX - 32, 32).unwrap()])));
     }
     #[test]
     fn backing_retained_through_failed_publication() {
         let pin = Arc::new(42u32);
         let weak = Arc::downgrade(&pin);
-        let mut f = Flight::new(7, Span::new(0, PAGE).unwrap(), pin).unwrap();
-        assert_eq!(f.publish(true, true), Err(Error::NotPlanned));
+        let mut f = Flight::new(FenceDomain::new(), 7, Span::new(0, PAGE).unwrap(), pin).unwrap();
+        assert_eq!(f.publish(proof(true, true)), Err(Error::NotPlanned));
         assert_eq!(f.retire(), Err(Error::NotPublished));
-        assert_eq!(f.plan(7, None), Ok(&Plan::Authoritative));
+        assert_eq!(plan(&mut f, 7, None), Ok(&Plan::Authoritative));
         for (handback, generation) in [(false, false), (false, true), (true, false)] {
-            assert_eq!(f.publish(handback, generation), Err(Error::PublicationFailed));
+            assert_eq!(f.publish(proof(handback, generation)), Err(Error::PublicationFailed));
             assert_eq!(f.retire(), Err(Error::NotPublished));
             assert!(weak.upgrade().is_some());
         }
-        assert_eq!(f.publish(true, true), Ok(()));
-        assert_eq!(f.publish(true, true), Err(Error::AlreadyPublished));
+        assert_eq!(f.publish(proof(true, true)), Ok(()));
+        assert_eq!(f.publish(proof(true, true)), Err(Error::AlreadyPublished));
         let retired = f.retire().unwrap();
         assert_eq!(*retired, 42);
         drop(retired);
@@ -250,15 +306,15 @@ mod tests {
     fn separate_flights_keep_separate_backing_leases() {
         let pin = Arc::new(7u32);
         let weak = Arc::downgrade(&pin);
-        let mut a = Flight::new(1, Span::new(0, PAGE).unwrap(), pin.clone()).unwrap();
-        let mut b = Flight::new(2, Span::new(0, PAGE).unwrap(), pin).unwrap();
-        a.plan(1, None).unwrap();
-        a.publish(true, true).unwrap();
+        let mut a = Flight::new(FenceDomain::new(), 1, Span::new(0, PAGE).unwrap(), pin.clone()).unwrap();
+        let mut b = Flight::new(FenceDomain::new(), 2, Span::new(0, PAGE).unwrap(), pin).unwrap();
+        plan(&mut a, 1, None).unwrap();
+        a.publish(proof(true, true)).unwrap();
         drop(a.retire().unwrap());
         assert!(weak.upgrade().is_some());
-        assert_eq!(b.plan(1, None), Err(Error::NotCompleted));
-        b.plan(2, None).unwrap();
-        b.publish(true, true).unwrap();
+        assert_eq!(plan(&mut b, 1, None), Err(Error::NotCompleted));
+        plan(&mut b, 2, None).unwrap();
+        b.publish(proof(true, true)).unwrap();
         drop(b.retire().unwrap());
         assert!(weak.upgrade().is_none());
     }
@@ -277,7 +333,7 @@ mod tests {
                 }
                 let region = f.region;
                 let r = report(&f, words.clone());
-                let Plan::Sparse(spans) = f.plan(7, Some(&r)).unwrap() else { panic!("unexpected fallback"); };
+                let Plan::Sparse(spans) = plan(&mut f, 7, Some(&r)).unwrap() else { panic!("unexpected fallback"); };
                 assert!(spans.windows(2).all(|w| w[0].end < w[1].start));
                 assert!(spans.iter().all(|s| region.start <= s.start && s.start < s.end && s.end <= region.end));
                 for i in 0..actual {

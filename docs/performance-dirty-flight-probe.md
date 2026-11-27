@@ -22,12 +22,14 @@ or instrument actual writers. Real implementation must verify descriptor
 lifetime and all store/atomic/copy/resolve/clear writers, out-of-domain
 writes, fault status and actual backing identity for each flight.
 
-A fence value is meaningful only in the same queue/device domain; the
-caller supplies verified completion. Device-loss sentinel or incomplete
-fence cannot plan. The model retains an Arc as a stand-in for a real
-backing lease; retirement is explicitly permitted only after successful
-handback AND generation publication. Failed acknowledgements retain the
-lease. A real owner must retain failed flights even if an API object is
+A fence value is meaningful only in the same queue/device domain. The
+model checks a distinct fence-domain identity as well as the value; the
+caller still supplies actual verified completion. Device-loss sentinel or
+incomplete/wrong-domain fence cannot plan. The retained Arc is a stand-in
+for an aggregate of actual backing and descriptor leases. Retirement is
+explicitly permitted only after handback, generation/alias publication,
+readback visibility and ordered title signals are all acknowledged.
+Failed acknowledgements retain the lease. A real owner must retain failed flights even if an API object is
 dropped, prevent duplicate publication on partial failure, and implement
 ordered shutdown/device-loss recovery. This serial model is not such an
 owner or a synchronization primitive; the bool acknowledgements are not
@@ -52,8 +54,8 @@ until approved and all native suites pass; no assumed FPS gain.
 ## Tests
 
 `python -m unittest discover -s tools -p test_dirty_flight.py`
-compiles the actual model with rustc. Nine cases exercise partial-page
+compiles the actual model with rustc. Eleven cases exercise partial-page
 clipping, zero/full masks, incomplete fence and device loss, stale
 ticket/fence, every coverage category, malformed/oversized masks,
-publication failure and independent retained leases, plus randomized
+publication failure, wrong fence domain, required readback/signal acknowledgements and independent retained leases, plus randomized
 page oracle across bitmap word boundaries. CPU-only, no hardware tests.
