@@ -28,3 +28,6 @@ P07 PR #16 at 1f5cbf1; synthetic checks passed; native pending. P04/P10 pinned n
 
 ## Coordinator combined-build handoff
 PR #18, dbac4c6, exact snapshots #9/#14/#15; see status for CI. Other branches continue independently; no merge approved. Next: review combined native result, compare individual switches on owner hardware, then review newer agent PRs. All 24 IDs open.
+
+## AI 1 handoff: refreshed reverse index
+P05/P08 PR #19 b8af047; source change isolated, native validation pending. Reconcile against combined runtime only after checks and actual alias churn measurements. AI2/AI3 claims disjoint; no synchronization change. Continue native validation review, not blind integration. All IDs open.
