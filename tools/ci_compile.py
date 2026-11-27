@@ -27,7 +27,15 @@ def run_stage(label, args, cwd):
             last_patch = None
             patch_locations = set()
             categories = set()
+            last_test = None
+            empty_tests = set()
             for line in output:
+                test = re.fullmatch(rb"Running runtime test: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
+                if test:
+                    last_test = test[1].decode("ascii")
+                empty = re.fullmatch(rb"Runtime test matched no passing tests: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
+                if empty:
+                    empty_tests.add(empty[1].decode("ascii"))
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
                 if b"error[E0425]" in line:
                     unresolved.update(re.findall(rb"\x60([A-Za-z_][A-Za-z_0-9]*)\x60", line))
@@ -58,6 +66,10 @@ def run_stage(label, args, cwd):
                     ):
                         if phrase in line.lower():
                             categories.add(category)
+            if last_test:
+                print("Last runtime suite attempted: " + last_test)
+            if empty_tests:
+                print("Empty runtime suites: " + ", ".join(sorted(empty_tests)))
             if last_patch:
                 print("Last patch attempted: " + last_patch)
             if patch_locations:

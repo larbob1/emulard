@@ -3,6 +3,7 @@
 """Prepare and optionally compile a pinned, separate runtime checkout."""
 import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -28,28 +29,49 @@ def build_binaries(target):
     run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
     run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
 
+def test_result_counts(output):
+    return [(int(passed), int(failed)) for passed, failed in
+            re.findall(r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;", output)]
+
+def test_suite(target, package, suite, *, env=None, diagnostics=False):
+    command = ["cargo", "test", "--locked", "-p", package, "--lib"]
+    if diagnostics:
+        command.extend(["--features", "diagnostics"])
+    command.append(suite)
+    print(f"Running runtime test: {package} {suite}", flush=True)
+    result = subprocess.run(command, cwd=target, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, errors="replace")
+    # Keep the compiler output available to local callers. CI filters this
+    # output and never republishes source or title data.
+    print(result.stdout, end="", flush=True)
+    result.check_returncode()
+    counts = test_result_counts(result.stdout)
+    if not counts or sum(passed for passed, _ in counts) == 0 or any(failed for _, failed in counts):
+        print(f"Runtime test matched no passing tests: {package} {suite}", flush=True)
+        raise subprocess.CalledProcessError(1, command)
+
 def validate_paired(target):
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
-        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
+        test_suite(target, "victory-hle", "physical_pages_map_alias_and_unmap", env=env)
     for runs in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS=runs)
-        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
-        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping"], cwd=target, env=env, check=True)
+        test_suite(target, "victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+        test_suite(target, "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_DIFF=mode, VICTORY_MAP_RUNS=mode)
-        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "tile_replay_checks"], cwd=target, env=env, check=True)
-    run(["cargo", "test", "--locked", "-p", "victory-hle", "perf6_worker_tests"], target)
-    run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_tests"], target)
-    run(["cargo", "test", "--locked", "-p", "victory-gpu", "perf4_tests"], target)
+        test_suite(target, "victory-hle", "tile_replay_checks", env=env)
+    test_suite(target, "victory-hle", "perf6_worker_tests")
+    test_suite(target, "victory-gpu", "mapping_tests")
+    test_suite(target, "victory-gpu", "perf4_tests")
     for enabled in ("0", "1"):
         env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
         for suite in ("difference_tests", "merge_tests"):
-            subprocess.run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], cwd=target, env=env, check=True)
+            test_suite(target, "victory-gpu", suite, env=env)
     for suite in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
-        run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], target)
-    run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
-    run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
+        test_suite(target, "victory-gpu", suite)
+    test_suite(target, "victory-shader", "wave64_tests")
+    test_suite(target, "victory-gpu", "compositor", diagnostics=True)
     build_binaries(target)
 
 def main():

@@ -71,3 +71,5 @@ actual test results and benchmarks before closing items.
 P08: ported the existing tile replay fixture and optional local mapping trace to paired-wave. Test calls run with mapping flags off and on. Trace files contain virtual addresses and are local-only; do not upload them. Actual compiled replay and captured title validation are still pending. No IDs closed.
 
 P02/P03: added local matched-pair aggregation and allowlisted cumulative counters. Real gameplay measurements and critical-path timing are not available. Use at least three matched pairs, with visual scene confirmation by the operator.
+
+P01/P24: the cumulative paired-wave test runner now requires at least one passing test per selected suite and reports the failing suite. A zero-test filter is a failure, not validation. Full Windows build/test results and Proton execution remain outstanding.
