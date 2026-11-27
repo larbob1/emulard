@@ -125,6 +125,50 @@ class FrameReportTests(unittest.TestCase):
         self.assertIsNone(comparison["approx_present_fps_ratio"])
         self.assertEqual(comparison["baseline_invalid_frame_batches"], 1)
 
+    def test_critical_evidence_separate_populations_and_overlap(self):
+        batch = "frame times: 3 frames in 0.5 s: shortest 20 ms, median 30, longest 450; 1 long (over 100 ms, the usual frame of the last 64 being 20); each: 20 30 450"
+        detail = ("render thread: ran 30 ms (user 20, kernel 10); in the present call 40.0 "
+                  "(lines and settling 30.0, copy and show 10.0), in submit calls 20.0, "
+                  "in list calls 30.0, paced 5.0 | submit thread: at work 100.0 ms "
+                  "(user 80.0, kernel 20.0); 4 submissions, preparing 200.0, waiting for "
+                  "the card 150.0; copies 20.0 ms 5.0 MB; copy-back 25.0 ms 4.0 MB | "
+                  "card: idle 10.0 ms (5.0 behind us); by its own clock, of the lists of a moment ago: "
+                  "our send-and-hash lists 20.0 ms in 2, our compare lists 30.0 ms in 3, "
+                  "all other lists 90.0 ms in 4 | remapping: 3 calls 300.0 ms (100.0 waiting for readers) | "
+                  "disk: 10 reads 8.0 MB 600.0 worker ms")
+        usual = "private usual frame (the mean of 2 not long): 25 ms | " + detail
+        long = "private long frame 3 at 1.0 s: 450 ms | " + detail
+        evidence = summarize([batch, usual, long, batch, usual.replace("8.0 MB", "4.0 MB")],
+                             skip_frame_batches=0)["critical_path_evidence"]
+        self.assertEqual(evidence["expected_usual_frames"], 4)
+        self.assertEqual(evidence["represented_usual_frames"], 4)
+        self.assertEqual(evidence["expected_long_frames_in_batches"], 2)
+        self.assertEqual(evidence["listed_long_frame_records"], 1)
+        u = evidence["usual_frame_cohort_means"]
+        self.assertEqual(u["storage"]["destination_mb"]["weighted_mean"], 6)
+        self.assertEqual(u["presenting_thread"]["present_settle_ms"]["weighted_mean"], 30)
+        self.assertEqual(u["overlapping_work"]["remap_reader_wait_ms"]["weighted_mean"], 100)
+        self.assertEqual(u["gpu_delayed"]["other_ms"]["weighted_mean"], 90)
+        self.assertEqual(evidence["selected_long_frames"]["storage"]["worker_ms"]["max"], 600)
+        self.assertEqual(evidence["critical_path_status"], "not attributable from aggregate counters")
+        self.assertNotIn("private", str(evidence))
+        skipped = summarize([batch, usual, long, batch, usual], skip_frame_batches=1)["critical_path_evidence"]
+        self.assertEqual(skipped["represented_usual_frames"], 2)
+        self.assertEqual(skipped["listed_long_frame_records"], 0)
+
+    def test_critical_evidence_missing_fields_and_weighting(self):
+        one = "frame times: 1 frames in 0.1 s: shortest 40 ms, median 40, longest 40; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 40"
+        three = one.replace("1 frames", "3 frames").replace("each: 40", "each: 40 40 40")
+        u1 = "usual frame (the mean of 1 not long): 40 ms | disk: 1 reads 4.0 MB 30.0 worker ms"
+        u3 = "usual frame (the mean of 3 not long): 40 ms | disk: 3 reads 8.0 MB 60.0 worker ms"
+        e = summarize([u1, one, u1, three, u3])["critical_path_evidence"]
+        self.assertEqual(e["unanchored_detail_records"], 1)
+        self.assertEqual(e["usual_frame_cohort_means"]["storage"]["destination_mb"],
+                         {"records": 2, "represented_frames": 4, "weighted_mean": 7})
+        self.assertEqual(e["usual_frame_cohort_means"]["gpu_delayed"], {})
+        malformed = summarize([one.replace("1 frames", "2 frames"), u1])["critical_path_evidence"]
+        self.assertEqual(malformed["represented_usual_frames"], 0)
+
     def test_hotpath_counters(self):
         result = summarize(["mapping diff run totals runs=4 pages=16", "texture view estimate hits hits=8"])
         self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)

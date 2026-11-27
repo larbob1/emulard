@@ -35,6 +35,8 @@ def aggregate(pairs, visible=False):
             "candidate_interval_quality": candidate.get("interval_sample_quality"),
             "baseline_individual": af,
             "candidate_individual": bf,
+            "baseline_critical_path_evidence": baseline.get("critical_path_evidence"),
+            "candidate_critical_path_evidence": candidate.get("critical_path_evidence"),
             "interval_comparison_usable": interval_usable,
             "individual_comparison_usable": frame_usable,
         })

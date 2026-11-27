@@ -38,7 +38,7 @@ ALIAS_RE = re.compile(
 
 def numeric_match(pattern, line):
     match = pattern.search(line)
-    return {k: float(v) for k, v in match.groupdict().items() if v is not None} if match else {}
+    return {k: float(v) for k, v in match.groupdict().items() if v is not None and isfinite(float(v))} if match else {}
 
 def stats(rows):
     return {key: {"median": round(median(values), 3), "max": max(values), "samples": len(values)}
@@ -53,7 +53,7 @@ OMITTED_LONG = re.compile(r"\blong frames: (?P<count>[0-9]+) more in this readin
 # Match the complete numeric payload and validate its declared count.
 FRAME_BATCH = re.compile(
     rf"\bframe times: (?P<count>[0-9]+) frames in {NUMBER} s: shortest {NUMBER} ms, "
-    rf"median {NUMBER}, longest {NUMBER}; [0-9]+ long \(over {NUMBER} ms, "
+    rf"median {NUMBER}, longest {NUMBER}; (?P<long_count>[0-9]+) long \(over {NUMBER} ms, "
     rf"the usual frame of the last [0-9]+ being {NUMBER}\); each: (?P<each>[0-9 ]+)\s*$"
 )
 
@@ -62,9 +62,78 @@ def frame_batch(line):
     if not match:
         return None
     values = [int(v) for v in match["each"].split()]
-    if not values or len(values) != int(match["count"]):
+    if not values or len(values) != int(match["count"]) or int(match["long_count"]) > len(values):
         return None
     return values
+
+
+# Pinned framelog::text emits these numeric groups in both usual (cohort
+# mean) and selected long-frame lines. Independent groups allow absent
+# fields without synthesizing zeros. No timestamped dependency trace exists.
+USUAL_FRAME = re.compile(rf"\busual frame \(the mean of (?P<count>[0-9]+) not long\): (?P<ms>{NUMBER}) ms \|")
+DETAIL_PATTERNS = {
+    "presenting_thread": (
+        re.compile(rf"render thread: ran (?P<render_cpu_ms>{NUMBER}) ms \(user {NUMBER}, kernel {NUMBER}\); in the present call (?P<present_ms>{NUMBER}) \(lines and settling (?P<present_settle_ms>{NUMBER}), copy and show (?P<present_show_ms>{NUMBER})\), in submit calls (?P<render_submit_ms>{NUMBER}), in list calls (?P<render_record_ms>{NUMBER}), paced (?P<render_pace_ms>{NUMBER})"),
+    ),
+    "overlapping_work": (
+        re.compile(rf"submit thread: at work (?P<worker_wall_ms>{NUMBER}) ms \(user (?P<worker_user_ms>{NUMBER}), kernel (?P<worker_kernel_ms>{NUMBER})\); {NUMBER} submissions, preparing (?P<prepare_ms>{NUMBER}), waiting for the card (?P<card_wait_ms>{NUMBER}); copies (?P<copy_ms>{NUMBER}) ms {NUMBER} MB; copy-back (?P<copy_back_ms>{NUMBER}) ms {NUMBER} MB"),
+        re.compile(rf"recording, all threads: (?P<all_record_ms>{NUMBER}) ms in {NUMBER} calls; all submit calls (?P<all_submit_ms>{NUMBER}) ms"),
+        re.compile(rf"remapping: (?P<remap_calls>{NUMBER}) calls (?P<remap_ms>{NUMBER}) ms \((?P<remap_reader_wait_ms>{NUMBER}) waiting for readers(?:[;)]|$)"),
+        REFRESH_RE,
+        re.compile(rf"pipelines: {NUMBER} made, {NUMBER} loaded, (?P<pipeline_wait_ms>{NUMBER}) ms waited"),
+        re.compile(rf"process: (?P<process_user_ms>{NUMBER}) user (?P<process_kernel_ms>{NUMBER}) kernel ms"),
+    ),
+    "gpu_delayed": (
+        re.compile(rf"card: idle (?P<idle_ms>{NUMBER}) ms \((?P<idle_behind_ms>{NUMBER}) behind us\); by its own clock, of the lists of a moment ago: our send-and-hash lists (?P<sync_ms>{NUMBER}) ms in {NUMBER}, our compare lists (?P<compare_ms>{NUMBER}) ms in {NUMBER}, all other lists (?P<other_ms>{NUMBER}) ms in {NUMBER}"),
+    ),
+    "storage": (
+        re.compile(rf"disk: (?P<reads>{NUMBER}) reads (?P<destination_mb>{NUMBER}) MB (?P<worker_ms>{NUMBER}) worker ms"),
+    ),
+}
+
+
+def detail_values(line):
+    groups = {}
+    for group, patterns in DETAIL_PATTERNS.items():
+        values = {}
+        for pattern in patterns:
+            values.update(numeric_match(pattern, line))
+        groups[group] = values
+    return groups
+
+
+def detail_stats(rows, usual=False):
+    result = {}
+    for group in DETAIL_PATTERNS:
+        keys = sorted({key for _, values in rows for key in values[group]})
+        metrics = {}
+        for key in keys:
+            samples = [(weight, values[group][key]) for weight, values in rows if key in values[group]]
+            represented = sum(weight for weight, _ in samples)
+            metrics[key] = {
+                "records": len(samples),
+                "represented_frames": represented,
+                **({"weighted_mean": round(sum(weight * value for weight, value in samples) / represented, 3)}
+                   if usual else {"median": median([value for _, value in samples]),
+                                  "max": max(value for _, value in samples)}),
+            }
+        result[group] = metrics
+    return result
+
+
+def critical_evidence(usual, long, expected_usual, expected_long, unanchored):
+    return {
+        "critical_path_status": "not attributable from aggregate counters",
+        "expected_usual_frames": expected_usual,
+        "represented_usual_frames": sum(weight for weight, _ in usual),
+        "expected_long_frames_in_batches": expected_long,
+        "listed_long_frame_records": len(long),
+        "unanchored_detail_records": unanchored,
+        "usual_frame_cohort_means": detail_stats(usual, usual=True),
+        "selected_long_frames": detail_stats(long),
+        "note": "Present subfields are nested; presenting-thread CPU, calls, pacing, worker and process totals can overlap. GPU list timings arrive later and cannot be assigned to this frame. Storage worker ms are aggregate service time, not wall time or queue latency. Usual cohorts are weighted by their represented frame count; long frames are selected and may be omitted. No totals, exclusive percentages, or bottleneck ranking are inferred. Missing fields have no metric.",
+    }
+
 
 def percentile(values, fraction):
     """Nearest rank, on the supplied sample population only."""
@@ -106,9 +175,15 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     cumulative = {}
     individual_frames = []
     batches_seen = invalid_batches = 0
+    detail_active = False
+    detail_header_seen = False
+    usual_details, long_details = [], []
+    expected_usual = expected_long = unanchored = 0
     for line in lines:
         update_counters(cumulative, line)
         if "frame times:" in line:
+            detail_header_seen = True
+            detail_active = False
             batch = frame_batch(line)
             if batch is None:
                 invalid_batches += 1
@@ -116,6 +191,20 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
                 batches_seen += 1
                 if batches_seen > skip_frame_batches:
                     individual_frames.extend(batch)
+                    detail_active = True
+                    long_count = int(FRAME_BATCH.search(line)["long_count"])
+                    expected_long += long_count
+                    expected_usual += len(batch) - long_count
+        usual_match = USUAL_FRAME.search(line)
+        long_match = LONG_FRAME.search(line)
+        if usual_match or long_match:
+            if detail_active:
+                if usual_match and int(usual_match["count"]) > 0:
+                    usual_details.append((int(usual_match["count"]), detail_values(line)))
+                elif long_match:
+                    long_details.append((1, detail_values(line)))
+            elif not detail_header_seen:
+                unanchored += 1
         if seen >= skip:
             long = LONG_FRAME.search(line)
             if long:
@@ -154,6 +243,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
     detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
+                "critical_path_evidence": critical_evidence(usual_details, long_details, expected_usual, expected_long, unanchored),
                 "interval_sample_quality": {"seen": seen, "skipped": skipped_intervals,
                     "invalid_after_warmup": invalid_intervals, "used": len(rows)},
                 "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
