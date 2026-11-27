@@ -94,3 +94,23 @@ dirty retry, and independent driver-library bookkeeping. Existing cache
 writes are not authorized by this model. An interleaved callback simulates
 a later note deterministically; it is not throughput or concurrent OS
 evidence. No new runtime flag or title launch.
+
+## Native Windows sidecar feasibility (test-only)
+
+tools/test_pipeline_cache_native_lease.py adds an independent subprocess
+probe. Linux uses flock, while native Windows Python calls LockFileEx
+with exclusive and fail-immediately flags for byte zero of a persistent
+sidecar. Only a lock conflict is classified as busy; other failures
+must not publish. The child holds its own open file until exit. Four
+cases cover normal close, abrupt termination of the fixture's child,
+independent cache directories, and open failure. The marker is synthetic;
+the sidecar content and file identity are checked after release.
+
+Run the same fixture in isolated native Windows CI with Python
+and separately on Linux. Linux success cannot validate the Windows
+branch. Neither validates Windows calls under Proton, cross-platform
+lock interoperability, alias handling on Windows, filesystem variation,
+or library save/startup ordering. No new production API is selected.
+The workspace declares Rust 1.88; do not silently introduce a newer
+standard-library locking requirement. Existing lease and cache policy,
+including RenderDoc exclusion, remain unchanged.
