@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from memory_report import summarize, SCHEMAS
+from memory_report import summarize, SCHEMAS, compare_grids
 
 
 def memory(private=2566, working=3637, copies=7, capacity=202, made=10):
@@ -74,6 +74,43 @@ class MemoryReportTests(unittest.TestCase):
         group = summarize([memory(made=10), memory(made=9)])["groups"]["memory"]
         self.assertEqual(group["descending_cumulative_records"], 1)
         self.assertEqual(group["metrics"]["upload_made"]["endpoint_change"], -1)
+
+
+class GridComparisonTests(unittest.TestCase):
+    def reports(self):
+        coverage = "memory, windows: the 3000 MB of windows lie over 2000 MB of title memory (the rest is memory that is in more than one window, and is copied once for each); host lists never reset since they were made: 9"
+        a = summarize([memory(), HOLDERS, coverage])
+        b = summarize([memory(capacity=150), HOLDERS.replace("4096 KiB", "2048 KiB"), coverage])
+        return a,b
+
+    def test_requires_operator_confirmation(self):
+        a,b = self.reports()
+        self.assertFalse(compare_grids(a,b)["comparison_usable"])
+        result = compare_grids(a,b,True)
+        self.assertTrue(result["comparison_usable"])
+        self.assertEqual(result["groups"]["memory"]["fields"]["host_copy_mib"]["last_difference"], -52)
+        self.assertFalse(result["groups"]["sweep"]["comparison_usable"])
+        self.assertEqual(result["groups"]["sweep"]["fields"], {})
+
+    def test_mixed_wrong_missing_and_invalid_grid(self):
+        a,b = self.reports()
+        self.assertFalse(compare_grids(a,a,True)["comparison_usable"])
+        for bad in (summarize([memory()]),
+                    summarize([memory(), HOLDERS.replace("4096 KiB", "3000 KiB")]),
+                    summarize([memory(), HOLDERS, HOLDERS.replace("4096 KiB", "2048 KiB")])):
+            self.assertFalse(compare_grids(a,bad,True)["comparison_usable"])
+        self.assertEqual(summarize([HOLDERS.replace("4096 KiB", "3000 KiB")])["groups"]["holders"]["invalid_records"], 1)
+        self.assertEqual(summarize([HOLDERS, HOLDERS.replace("4096 KiB", "2048 KiB")])["observed_window_grids_kib"], [2048,4096])
+
+    def test_missing_coverage_and_invalid_record_refuse_comparison(self):
+        a,b = self.reports()
+        b["groups"]["coverage"]["valid_records"] = 0
+        self.assertFalse(compare_grids(a,b,True)["comparison_usable"])
+        a,b = self.reports()
+        b["groups"]["holders"]["invalid_records"] = 1
+        result = compare_grids(a,b,True)
+        self.assertFalse(result["comparison_usable"])
+        self.assertEqual(result["groups"]["memory"]["fields"], {})
 
 
 if __name__ == "__main__":

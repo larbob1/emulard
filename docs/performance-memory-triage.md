@@ -59,3 +59,30 @@ Age changes cannot safely replace Arc/COM/retire protections. #35 review
 remains blocked on independent ownership for recorded/replayed lists that
 skip heap refresh; a retained ID3D12DescriptorHeap is not proof the Rust
 HostHeap wrapper and its resources are retained. No production authorization.
+
+## D18/D19 bounded grid comparison (review only)
+
+Do not initiate a grid trial until native #39, descriptor review, recovered
+comparable initial host headroom and coordinator approval. Existing B003/B004
+ended on protection stops and are not completed matched phases. Pinned
+VICTORY_WINDOW_KB accepts power-of-two 64..4096; VICTORY_WINDOW_TAILS remains
+off and unchanged. #39 tests show clustered asks can reduce logical capacity
+but crossing asks can increase it. Neither predicts title workload or RSS.
+
+After separately approved trials, select the same completed bounded phase
+from each local log, and retain original full logs locally. Use:
+
+    python3 tools/memory_report.py candidate-phase.log --baseline-grid control-phase.log --matched-completed-phase-confirmed
+
+Only attest when both completed that phase without guard stop, same build,
+settings, cache, tails, duration/phase and comparable restored preflight
+headroom; otherwise omit confirmation and inspect the individual reports.
+The parser checks all valid observed grid values (control exactly 4096,
+candidate exactly 2048), clean memory/holder/coverage populations, and refuses
+mixed/invalid/missing evidence. Clean optional sweep population reported
+separately. Per-group last/max signed differences only; no capacity minus
+RSS or cross-group subtraction, no exclusive owner attribution. Different
+counts and sampling endpoints need not coincide. Existing host sampler
+records actual RAM/swap separately; record phase, stop cause, drops/input,
+frame times, queue and remap evidence locally. No automatic savings or
+performance claim, no policy change. Exit 2 if comparison evidence refused.

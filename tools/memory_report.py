@@ -48,6 +48,7 @@ def summarize(lines):
     groups = {name: {"valid_records": 0, "invalid_records": 0,
                      "descending_cumulative_records": 0, "metrics": {}}
               for name in SCHEMAS}
+    observed_grids = set()
     for ordinal, line in enumerate(lines, 1):
         for name, (marker, pattern, fields, cumulative) in SCHEMAS.items():
             # Prefix may contain a timestamp and logger target; never export it.
@@ -70,6 +71,12 @@ def summarize(lines):
             if len(values) != len(fields) or any(v > MAX_U64 for v in values.values()):
                 row["invalid_records"] += 1
                 continue
+            if name == "holders":
+                grid = values["window_grid_kib"]
+                if grid not in (64, 128, 256, 512, 1024, 2048, 4096):
+                    row["invalid_records"] += 1
+                    continue
+                observed_grids.add(grid)
             row["valid_records"] += 1
             metrics = row["metrics"]
             if any(k in metrics and values[k] < metrics[k]["last"] for k in cumulative):
@@ -83,21 +90,98 @@ def summarize(lines):
             break
     return {
         "groups": groups,
+        "observed_window_grids_kib": sorted(observed_grids),
         "note": "Single operator-selected phase, line ordinals relative to supplied input, not clock times. Groups sampled separately; rounded MiB counters may overlap. Made counters are cumulative creation, not live or resident memory. Holder categories are Arc/COM reference proxies, not exclusive owners or unique object counts; window-use and asked-span lines iterate map entries, while the main window census deduplicates objects. Coverage is title address coverage not physical residency; sweep totals are cumulative release accounting, not immediate physical RAM returned; no sums, ownership attribution, leak diagnosis, or causal timing inference. Missing group or invalid record is not zero. Endpoint change is not allocation/release throughput. Descending cumulative values may indicate reset or log ordering. No raw log text, paths, addresses or identifiers.",
+    }
+
+
+# Compare only corresponding fields in independent producer groups.
+# No cross-group subtraction: the primary census deduplicates windows,
+# whereas coverage/holder observations may count repeated map entries.
+GRID_METRICS = {
+    "memory": ("working_set_mib", "private_mib", "system_free_mib",
+               "host_copies", "host_copy_mib", "windows", "window_mib",
+               "snapshot_reserved_mib", "texture_staging_mib", "host_texture_mib"),
+    "holders": ("windows_in_slots", "windows_in_slots_mib", "windows_in_lists",
+                "windows_in_lists_mib", "window_pages_ever_copied_mib",
+                "windows_unknown_length", "windows_unknown_length_mib"),
+    "coverage": ("window_mib", "title_window_coverage_mib", "lists_never_reset"),
+    "sweep": ("window_asked_span_mib",),
+}
+
+
+def clean(group):
+    return (group["valid_records"] > 0 and group["invalid_records"] == 0
+            and group["descending_cumulative_records"] == 0)
+
+
+def compare_grids(baseline, candidate, confirmed=False):
+    a, b = baseline["groups"], candidate["groups"]
+    issues = []
+    if not confirmed:
+        issues.append("matched_completed_phase_not_operator_confirmed")
+    for report, groups, expected, label in (
+            (baseline, a, 4096, "baseline"), (candidate, b, 2048, "candidate")):
+        if report.get("observed_window_grids_kib") != [expected] or not clean(groups["holders"]):
+            issues.append(label + "_grid_evidence_invalid_or_missing")
+        if not clean(groups["memory"]) or not clean(groups["coverage"]):
+            issues.append(label + "_primary_or_coverage_evidence_invalid_or_missing")
+    observations = {}
+    for group, fields in GRID_METRICS.items():
+        usable = not issues and clean(a[group]) and clean(b[group])
+        observations[group] = {
+            "baseline_records": a[group]["valid_records"],
+            "candidate_records": b[group]["valid_records"],
+            "comparison_usable": bool(usable),
+            "fields": {},
+        }
+        for field in fields:
+            left = a[group]["metrics"].get(field)
+            right = b[group]["metrics"].get(field)
+            if left is None or right is None:
+                continue
+            if usable:
+                observations[group]["fields"][field] = {
+                    "baseline_last": left["last"], "candidate_last": right["last"],
+                    "last_difference": right["last"] - left["last"],
+                    "baseline_max": left["max"], "candidate_max": right["max"],
+                    "max_difference": right["max"] - left["max"],
+                }
+    return {
+        "operator_confirmed_matched_completed_phase": confirmed,
+        "comparison_usable": not issues,
+        "issues": issues,
+        "groups": observations,
+        "note": "4096 KiB control versus 2048 KiB candidate. Operator confirmation means same build, phase, settings, tails, cache and comparable restored initial headroom; both completed the bounded phase without guard stop. Not independently verified. Last and max are separate observed samples, not synchronized or equal-duration populations. Rounded capacity and holder proxies are not physical RAM savings. No cross-group arithmetic, causal inference, or gameplay acceptance. Compare local OS RSS/swap/availability trajectory and correctness separately.",
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("log", type=Path, help="local log or operator-selected phase slice")
+    parser.add_argument("--baseline-grid", type=Path, help="local 4096 KiB phase log; positional log must be 2048 KiB")
+    parser.add_argument("--matched-completed-phase-confirmed", action="store_true",
+                        help="operator confirms both runs completed same bounded phase without guard stop, same build/settings/tails/cache and comparable restored headroom")
     args = parser.parse_args()
+    if args.matched_completed_phase_confirmed and not args.baseline_grid:
+        parser.error("confirmation requires --baseline-grid")
     try:
         with args.log.open(encoding="utf-8", errors="replace") as handle:
             result = summarize(handle)
+        if args.baseline_grid:
+            if args.log.resolve() == args.baseline_grid.resolve():
+                raise ValueError("same input")
+            with args.baseline_grid.open(encoding="utf-8", errors="replace") as handle:
+                baseline = summarize(handle)
+            result["baseline"] = baseline
+            result["grid_comparison"] = compare_grids(
+                baseline, result, args.matched_completed_phase_confirmed)
     except (OSError, ValueError):
         print(json.dumps({"status": "unavailable"}))
         return 1
     print(json.dumps(result, indent=2, allow_nan=False))
+    if args.baseline_grid and not result["grid_comparison"]["comparison_usable"]:
+        return 2
     return 0 if any(g["valid_records"] for g in result["groups"].values()) else 2
 
 
