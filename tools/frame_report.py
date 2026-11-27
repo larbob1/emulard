@@ -3,6 +3,7 @@
 """Summarize only numerical frame telemetry; never upload or echo source logs."""
 import argparse
 import json
+from math import ceil
 from pathlib import Path
 import re
 from statistics import median
@@ -45,12 +46,27 @@ def stats(rows):
             if (values := [row[key] for row in rows if key in row])}
 
 
+LONG_FRAME = re.compile(rf"\blong frame [0-9]+ at {NUMBER} s: (?P<ms>{NUMBER}) ms \|")
+OMITTED_LONG = re.compile(r"\blong frames: (?P<count>[0-9]+) more in this reading are not listed")
+
+def percentile(values, fraction):
+    """Nearest rank, on the supplied sample population only."""
+    ordered = sorted(values)
+    return ordered[max(0, ceil(len(ordered) * fraction) - 1)] if ordered else None
+
 def summarize(lines, skip=0):
     rows = []
     seen = 0
-    remaps, aliases = [], []
+    remaps, aliases, long_frames = [], [], []
+    omitted_long = 0
     for line in lines:
         if seen >= skip:
+            long = LONG_FRAME.search(line)
+            if long:
+                long_frames.append(float(long["ms"]))
+            omitted = OMITTED_LONG.search(line)
+            if omitted:
+                omitted_long += int(omitted["count"])
             remap = numeric_match(REMAP_PATTERN, line)
             if remap:
                 remap.update(numeric_match(REFRESH_RE, line))
@@ -67,7 +83,9 @@ def summarize(lines, skip=0):
             if row["frame"] > 0:
                 rows.append(row)
     detailed = {"long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
-                "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases)}
+                "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases),
+                "reported_long_frames": {"samples": len(long_frames), "max_ms": max(long_frames, default=None),
+                    "omitted_count": omitted_long, "note": "Selected slow frames only; not a full distribution."}}
     if not rows:
         return {"samples": 0, "status": "no matching positive frame-time samples", **detailed}
     med = {key: round(median(row[key] for row in rows), 3) for key in rows[0]}
@@ -77,11 +95,14 @@ def summarize(lines, skip=0):
         **detailed,
         "intervals_meeting_target_without_reported_drops": sum(row["frame"] <= 100 and row["dropped"] == 0 and row["compiling"] == 0 for row in rows),
         "median_reported_interval": med,
+        "reported_interval_frame_ms_percentiles": {f"p{p}": percentile([row["frame"] for row in rows], p / 100) for p in (50, 90, 95, 99)},
+        "fps_milestones": {str(fps): {"intervals": sum(row["frame"] <= 1000 / fps for row in rows),
+            "without_reported_drops_or_pending": sum(row["frame"] <= 1000 / fps and row["dropped"] == 0 and row["compiling"] == 0 for row in rows)} for fps in (5, 10, 20, 30, 60)},
         "target_frame_ms": 100,
         "frame_ms_above_target": round(max(0, frame - 100), 3),
         "intervals_at_or_below_target": sum(row["frame"] <= 100 for row in rows),
         "intervals_with_dropped_draws": sum(row["dropped"] > 0 for row in rows),
-        "note": "Interval medians, not per-frame percentiles; stage timings can overlap."
+        "note": "Interval averages, not per-frame percentiles; stage timings can overlap. Visual correctness must be verified separately."
     }
 
 def compare(baseline, candidate):

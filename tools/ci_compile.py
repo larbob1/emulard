@@ -47,7 +47,9 @@ def run_stage(label, args, cwd):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--lighting-memory", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--lighting-memory", action="store_true")
+    mode.add_argument("--paired-wave-refresh", action="store_true")
     args = parser.parse_args()
     if os.name != "nt":
         parser.error("Windows build host required.")
@@ -60,6 +62,11 @@ def main():
                 ROOT / "tools",
             )
             prepare = [sys.executable, str(ROOT / "tools" / "build_runtime.py"), str(target)]
+            if args.paired_wave_refresh:
+                run_stage("Paired-wave preparation, tests and release/diag compilation",
+                          prepare + ["--paired-wave-refresh", "--build"], ROOT)
+                print("Paired-wave compile and test checks completed. No gameplay execution was attempted.", flush=True)
+                return 0
             if args.lighting_memory:
                 prepare.append("--lighting-memory")
             run_stage("Pinned source preparation", prepare, ROOT)

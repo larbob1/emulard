@@ -52,6 +52,16 @@ class FrameReportTests(unittest.TestCase):
         self.assertNotIn("private prefix", str(result))
         self.assertEqual(summarize([line])["long_frame_samples"], 1)
 
+    def test_interval_percentiles_and_milestones(self):
+        report = summarize([sample(20), sample(50), sample(100, 1), sample(300),
+                            "long frame 3 at 3.0 s: 400 ms | other details",
+                            "long frames: 4 more in this reading are not listed"])
+        self.assertEqual(report["reported_interval_frame_ms_percentiles"]["p95"], 300)
+        self.assertEqual(report["fps_milestones"]["20"]["intervals"], 2)
+        self.assertEqual(report["fps_milestones"]["10"]["without_reported_drops_or_pending"], 2)
+        self.assertEqual(report["reported_long_frames"]["max_ms"], 400)
+        self.assertEqual(report["reported_long_frames"]["omitted_count"], 4)
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

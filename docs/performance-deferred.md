@@ -8,9 +8,9 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 
 | ID | Origin | Status | Outstanding work / acceptance evidence |
 | --- | --- | --- | --- |
-| P01 | 1 | Open | Compile the paired-wave candidate, run phase 1/2/3 tests on Windows and Proton, including aliases, partial failures, concurrent readers and replay. Record real results. |
+| P01 | 1 | Open | Compile the paired-wave candidate, run phase 1–6 tests on Windows and Proton, including aliases, partial failures, concurrent readers and replay. Record real results. |
 | P02 | 1 | Open | Matched scene benchmarking after warmup with capture off; collect frame wall time, median and tail latency, dropped draws, GPU/CPU utilization and mapping counts. Compare native Windows and Proton. |
-| P03 | 1 | Open | Critical-path instrumentation distinct from overlapping worker totals; extend numeric reports for later counters and percentile samples. |
+| P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Full per-frame distribution, later counters and critical-path attribution remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
 | P05 | 2 | Open | Full placeholder interval tracking and coalescing/splitting optimization; demonstrate fewer host calls on captured workloads. |
 | P06 | 2 | Open | Transactional mapper failure recovery, checked map/unmap results, rollback or documented failure semantics; fault-injection tests. |
@@ -25,12 +25,14 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P15 | 4 | Candidate | Optional hard idle snapshot budget implemented; validate memory pressure and allocation churn. Persistent resources, staging reuse, async transfers, detiling and VRAM/RAM budget validation remain open. |
 | P16 | 5 | Open | Unsupported shader operations, paired-wave semantics, waterfall loops, FidelityFX descriptor mutation, missing pipeline methods; ensure scene rendering correctness. |
 | P17 | 5 | Candidate | Process-local cache save serialization and retry bookkeeping, optional bounded requested-graphics bursts and compiler worker count implemented. Persistent shader cache key coverage, cross-process cache ownership, compile worker stability, native-wave specialization and dropped draws remain open; validate. |
-| P18 | 6 | Open | Descriptor and command list caching, storage worker tuning, release/PGO evaluation, native Linux backend feasibility. |
-| P19 | 6 | Open | Consolidate validated improvements across runtime variants, improve CI and run end-to-end correctness/performance acceptance; close only with evidence. |
+| P18 | 6 | Candidate | Opt-in paired-wave DirectStorage worker cap implemented. Descriptor/command list caching, release/PGO evaluation, native Linux backend feasibility and measured worker tuning remain open. |
+| P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Actual compile and end-to-end results, and other runtime variant ports remain open. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
-| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. |
-
+| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. | 
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
+
+| P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
+| P24 | 6 | Open | Repair any remaining compile/CI failures; verify the builder anchor fix and all cumulative source patches on pinned checkouts. |
 
 ## Current state
 
@@ -42,4 +44,9 @@ Phase 4: opt-in GPU copy-back scan/merge and idle snapshot budget candidates;
 production shader dirty bitmap and asynchronous readbacks remain deferred.
 Phase 5: pipeline scheduling candidates and process-local cache publication
 fixes; unsupported shader lowering and actual rendering validation remain open.
-Phase 6 is not implemented. Keep this register updated in Phase 6.
+Phase 6: storage worker cap, reporting extensions, cumulative runtime CI,
+and builder anchor repair committed. This is the end of the six-phase
+implementation sequence, not a performance release. All 24 register items
+remain unresolved pending their acceptance evidence. No item is closed on
+implementation alone. Keep this register on subsequent branches and record
+actual test results and benchmarks before closing items.

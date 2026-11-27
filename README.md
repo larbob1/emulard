@@ -250,6 +250,13 @@ for optional compiler scheduling experiments and process-local pipeline
 cache publication fixes. See [Phase 5 validation](docs/performance-phase5.md)
 and the [cumulative register](docs/performance-deferred.md).
 
+### Six-phase performance candidate
+
+Phase 6 adds an optional `VICTORY_DISK_WORKERS` cap on paired-wave,
+expanded interval reports and cumulative runtime validation CI. See
+[Phase 6 acceptance](docs/performance-phase6.md) and the permanent
+[deferred-work register](docs/performance-deferred.md). No verified FPS gain.
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`
