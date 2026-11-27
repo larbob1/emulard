@@ -220,6 +220,14 @@ retaining dirty notifications. It is disabled by default. See
 [phase 1 performance validation](docs/performance-phase1.md) for matched-run
 instructions and limitations. No sustained FPS improvement has been verified.
 
+### Experimental range-diff mapping
+
+Set `VICTORY_MAP_DIFF=1` in the paired-wave performance candidate to
+preserve unchanged spans in partially changed physical mappings, group
+unchanged scatter requests and try placeholder coalescing before splitting.
+See [phase 2 performance validation](docs/performance-phase2.md). This is
+opt-in and not yet compiled or benchmarked.
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`
