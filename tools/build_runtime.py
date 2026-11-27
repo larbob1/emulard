@@ -39,12 +39,16 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     if ignored:
-        if package != "victory-gpu" or suite != "shader_cache_reuse_actual_equivalence" or expected != 1 or env is None or env.get("VICTORY_SHADER_CACHE_REUSE_TRANSLATED") not in ("0", "1"):
+        mode_key = {
+            "shader_cache_reuse_actual_equivalence": "VICTORY_SHADER_CACHE_REUSE_TRANSLATED",
+            "actual_build_memo_modes_and_tls_fallback": "VICTORY_SHADER_BUILD_MEMO",
+        }.get(suite)
+        if package != "victory-gpu" or mode_key is None or expected != 1 or env is None or env.get(mode_key) not in ("0", "1"):
             raise ValueError("ignored shader cache fixture requires explicit mode and count-one gate")
         command.extend(["--", "--ignored", "--test-threads=1"])
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS", "VICTORY_SHADER_CACHE_REUSE_TRANSLATED")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS", "VICTORY_SHADER_CACHE_REUSE_TRANSLATED", "VICTORY_SHADER_BUILD_MEMO")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -113,9 +117,14 @@ def validate_paired(target, *, keep_going=False):
     suite("victory-gpu", "compositor", diagnostics=True)
     suite("victory-gpu", "entries_round_trip_and_reject_damage", expected=1)
     for mode in ("0", "1"):
-        env = dict(os.environ, VICTORY_SHADER_CACHE_REUSE_TRANSLATED=mode)
+        env = dict(os.environ, VICTORY_SHADER_CACHE_REUSE_TRANSLATED=mode, VICTORY_SHADER_BUILD_MEMO="0")
         suite("victory-gpu", "shader_cache_reuse_actual_equivalence", env=env, expected=1, ignored=True)
         suite("victory-gpu", "shader_cache_publication_failure_keeps_runtime_translation", env=env, expected=1)
+    env = dict(os.environ, VICTORY_SHADER_BUILD_MEMO="0", VICTORY_SHADER_CACHE_REUSE_TRANSLATED="0", VICTORY_SHADER_CACHE_KEY="normal")
+    suite("victory-gpu", "build_memo_tests", env=env, expected=2)
+    for mode in ("0", "1"):
+        env = dict(os.environ, VICTORY_SHADER_BUILD_MEMO=mode, VICTORY_SHADER_CACHE_REUSE_TRANSLATED="0", VICTORY_SHADER_CACHE_KEY="normal")
+        suite("victory-gpu", "actual_build_memo_modes_and_tls_fallback", env=env, expected=1, ignored=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:

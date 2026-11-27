@@ -51,6 +51,49 @@ class ValidationPlanTests(unittest.TestCase):
                 test_suite(Path("."), "victory-gpu", "shader_cache_reuse_actual_equivalence", env={}, expected=1, ignored=True)
             run.assert_not_called()
 
+    def test_memo_native_plan(self):
+        with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
+            validate_paired(Path("."))
+        normal = [c for c in suite.call_args_list if c.args[1:3] == ("victory-gpu", "build_memo_tests")]
+        self.assertEqual(len(normal), 1)
+        self.assertEqual(normal[0].kwargs["expected"], 2)
+        self.assertFalse(normal[0].kwargs["ignored"])
+        native = [c for c in suite.call_args_list if c.args[1:3] == ("victory-gpu", "actual_build_memo_modes_and_tls_fallback")]
+        self.assertEqual(len(native), 2)
+        self.assertEqual([c.kwargs["env"]["VICTORY_SHADER_BUILD_MEMO"] for c in native], ["0", "1"])
+        for c in native:
+            self.assertEqual(c.kwargs["expected"], 1)
+            self.assertTrue(c.kwargs["ignored"])
+            self.assertEqual(c.kwargs["env"]["VICTORY_SHADER_CACHE_REUSE_TRANSLATED"], "0")
+            self.assertEqual(c.kwargs["env"]["VICTORY_SHADER_CACHE_KEY"], "normal")
+        self.assertEqual(run.call_count, 2)
+
+    def test_memo_gate_counts_and_modes(self):
+        from build_runtime import test_suite
+        name = "actual_build_memo_modes_and_tls_fallback"
+        for mode in ("0", "1"):
+            env = {"VICTORY_SHADER_BUILD_MEMO": mode}
+            for output, ok in (("test result: ok. 1 passed; 0 failed;", True),
+                               ("test result: ok. 0 passed; 0 failed;", False),
+                               ("test result: ok. 2 passed; 0 failed;", False),
+                               ("test result: ok. 1 passed; 0 failed;\ntest result: ok. 0 passed; 0 failed;", False)):
+                with self.subTest(mode=mode, output=output), patch("build_runtime.subprocess.run") as run:
+                    run.return_value.stdout = output
+                    if ok:
+                        test_suite(Path("."), "victory-gpu", name, env=env, expected=1, ignored=True)
+                    else:
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            test_suite(Path("."), "victory-gpu", name, env=env, expected=1, ignored=True)
+                    self.assertEqual(run.call_args.args[0][-4:], [name, "--", "--ignored", "--test-threads=1"])
+        with patch("build_runtime.subprocess.run") as run:
+            for package, suite, env, expected in (("victory-gpu", name, {}, 1),
+                ("victory-gpu", name, {"VICTORY_SHADER_BUILD_MEMO": "2"}, 1),
+                ("victory-hle", name, {"VICTORY_SHADER_BUILD_MEMO": "1"}, 1),
+                ("victory-gpu", name, {"VICTORY_SHADER_BUILD_MEMO": "0"}, 2)):
+                with self.assertRaises(ValueError):
+                    test_suite(Path("."), package, suite, env=env, expected=expected, ignored=True)
+            run.assert_not_called()
+
     def test_default_fails_fast(self):
         with patch("build_runtime.test_suite", side_effect=subprocess.CalledProcessError(1, ["test"])) as suite, patch("build_runtime.run") as run:
             with self.assertRaises(subprocess.CalledProcessError):

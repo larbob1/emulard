@@ -2,7 +2,7 @@ name: Paired-wave performance runtime validation
 
 on:
   push:
-    branches: ['dev/performance-phase6', 'dev/performance-phase6-shader-cache-reuse-native']
+    branches: ['dev/performance-phase6', 'dev/performance-phase6-shader-cache-reuse-native', 'dev/performance-phase6-shader-build-memo-native']
     paths-ignore:
       - 'docs/**'
       - 'README.md'
