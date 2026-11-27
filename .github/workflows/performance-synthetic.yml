@@ -29,6 +29,10 @@ jobs:
         run: |
           rustc --edition 2024 --test probes/software_pages.rs -o /tmp/emulard-software-pages
           /tmp/emulard-software-pages
+      - name: Standalone pinned backing view tests
+        run: |
+          rustc --edition 2024 --test probes/pinned_views.rs -o /tmp/emulard-pinned-views
+          /tmp/emulard-pinned-views
 
   portable-copy:
     runs-on: ubuntu-latest
