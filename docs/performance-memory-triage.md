@@ -36,3 +36,26 @@ Keep raw logs local, share reviewed numeric summaries. Existing memory
 guard stays unchanged. No prolonged tests until coordinator/owner clear a
 bounded plan. No claim leak, ownership, causal bottleneck or gameplay FPS.
 Exit 0 at least one valid record, 1 unavailable, 2 no valid record.
+
+## B003 holder and sweep follow-up (D15)
+
+AI4 #27 7210742582 reports 17s windows 6/28 to 658/3000 MiB, COM-holder
+proxy 4/16 to 648/2960 MiB, Arc-holder proxy 3/16 to 658/3000 MiB,
+asked spans 8 to 1231 MiB, copied-page accounting 9 to 1199 MiB and
+address union 24 to 2276 MiB. Cumulative sweep accounting 1/4 to 3/16
+MiB (two separate release events in full run). No new launch.
+The fifth parsed group is the existing memory let go since the start line:
+window/staging cumulative releases and current asked-span sum. Declining
+asked-span is not a cumulative reset. Release accounting does not measure
+actual physical reclamation (retire may defer destruction).
+
+Source-level qualification: shadow::memory deduplicates LOOSE Arc pointers;
+shadow::window_use and windows iterate map entries without deduplication.
+Window holder metrics are COM reference count >1 and Arc strong count >1,
+not direct identification of descriptor slots or particular lists, and can
+include other owners and repeated entries. Do not calculate percentages of
+unique windows, sum proxy groups, or infer eligibility from their difference.
+Age changes cannot safely replace Arc/COM/retire protections. #35 review
+remains blocked on independent ownership for recorded/replayed lists that
+skip heap refresh; a retained ID3D12DescriptorHeap is not proof the Rust
+HostHeap wrapper and its resources are retained. No production authorization.

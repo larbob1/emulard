@@ -31,6 +31,11 @@ SCHEMAS = {
         "memory, windows:",
         " the # MB of windows lie over # MB of title memory (the rest is memory that is in more than one window, and is copied once for each); host lists never reset since they were made: #",
         "window_mib title_window_coverage_mib lists_never_reset"),
+    "sweep": schema(
+        "memory let go since the start:",
+        " # windows outside buffers # MB, # staging buffers # MB; of the windows alive, # MB lie between the lowest and highest address asked for in each",
+        "windows_released windows_released_mib staging_released staging_released_mib window_asked_span_mib",
+        ("windows_released", "windows_released_mib", "staging_released", "staging_released_mib")),
     "shader_cache": schema(
         "memory kept beside the lines below:",
         " # shader containers # MB, # translations # MB; the pipeline library's file # MB (its last save wrote # MB)",
@@ -78,7 +83,7 @@ def summarize(lines):
             break
     return {
         "groups": groups,
-        "note": "Single operator-selected phase, line ordinals relative to supplied input, not clock times. Groups sampled separately; rounded MiB counters may overlap. Made counters are cumulative creation, not live or resident memory. Holder categories may overlap, coverage is title address coverage not physical residency; no sums, ownership attribution, leak diagnosis, or causal timing inference. Missing group or invalid record is not zero. Endpoint change is not allocation/release throughput. Descending cumulative values may indicate reset or log ordering. No raw log text, paths, addresses or identifiers.",
+        "note": "Single operator-selected phase, line ordinals relative to supplied input, not clock times. Groups sampled separately; rounded MiB counters may overlap. Made counters are cumulative creation, not live or resident memory. Holder categories are Arc/COM reference proxies, not exclusive owners or unique object counts; window-use and asked-span lines iterate map entries, while the main window census deduplicates objects. Coverage is title address coverage not physical residency; sweep totals are cumulative release accounting, not immediate physical RAM returned; no sums, ownership attribution, leak diagnosis, or causal timing inference. Missing group or invalid record is not zero. Endpoint change is not allocation/release throughput. Descending cumulative values may indicate reset or log ordering. No raw log text, paths, addresses or identifiers.",
     }
 
 

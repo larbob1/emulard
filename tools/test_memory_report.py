@@ -53,6 +53,23 @@ class MemoryReportTests(unittest.TestCase):
         self.assertEqual(groups["holders"]["invalid_records"], 1)
         self.assertNotIn("private-secret", json.dumps(result))
 
+    def test_sweep_and_asked_spans_have_distinct_semantics(self):
+        def sweep(n, mb, asked):
+            return (f"memory let go since the start: {n} windows outside buffers {mb} MB, "
+                    f"2 staging buffers 8 MB; of the windows alive, {asked} MB lie between "
+                    "the lowest and highest address asked for in each")
+        result = summarize([sweep(1, 4, 8), sweep(3, 16, 1231),
+                            sweep(3, 16, 1000), sweep(2, 12, 900),
+                            "memory let go since the start: private-malformed"])
+        g = result["groups"]["sweep"]
+        self.assertEqual(g["valid_records"], 4)
+        self.assertEqual(g["invalid_records"], 1)
+        self.assertEqual(g["descending_cumulative_records"], 1)
+        self.assertEqual(g["metrics"]["window_asked_span_mib"]["max"], 1231)
+        self.assertEqual(g["metrics"]["windows_released"]["endpoint_change"], 1)
+        self.assertNotIn("private-malformed", json.dumps(result))
+        self.assertEqual(summarize([memory()])["groups"]["sweep"]["metrics"], {})
+
     def test_cumulative_decrease_does_not_hide_latest(self):
         group = summarize([memory(made=10), memory(made=9)])["groups"]["memory"]
         self.assertEqual(group["descending_cumulative_records"], 1)
