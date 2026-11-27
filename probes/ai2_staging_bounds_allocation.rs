@@ -5,7 +5,7 @@ mod ai2_staging_bounds_allocation {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
     use victory_formats::texture::{Desc, Dimension, Layout, Swizzle};
-    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8_UNORM, DXGI_SAMPLE_DESC};
+    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_BC1_UNORM, DXGI_SAMPLE_DESC};
     use windows_sys::Win32::System::Memory::{VirtualAlloc, VirtualFree, MEM_RESERVE, MEM_RELEASE, PAGE_NOACCESS};
 
     fn r8(h: &crate::host::Host, width: u32, height: u32) ->
@@ -30,6 +30,50 @@ mod ai2_staging_bounds_allocation {
         assert_eq!(active, vec![u64::from(width)]);
         assert_eq!(rows, vec![height]);
         (layout, footprints, rows, active, total)
+    }
+
+    // Recheck the confirmed #106 descriptor cases through the NEW helper,
+    // not merely through independent extent arithmetic.
+    #[test]
+    fn actual_staging_extent_descriptor_compatibility() {
+        assert_eq!(std::env::var("VICTORY_D3D12_WARP").as_deref(), Ok("1"));
+        assert!(crate::host::warp_adapter().is_ok());
+        let h = host().expect("software host");
+        for (dim, w, hgt, depth, mips, elem, block, format, want_total, want_full) in [
+            (Dimension::Tex2d,4,2,1,1,1,1,DXGI_FORMAT_R8_UNORM,260,512),
+            (Dimension::Tex2d,64,2,1,1,4,1,DXGI_FORMAT_R8G8B8A8_UNORM,512,512),
+            (Dimension::Tex2d,8,4,2,3,1,1,DXGI_FORMAT_R8_UNORM,3586,3840),
+            (Dimension::Tex3d,8,4,3,1,1,1,DXGI_FORMAT_R8_UNORM,2824,3072),
+            (Dimension::Tex2d,8,8,1,1,8,4,DXGI_FORMAT_BC1_UNORM,272,512),
+        ] {
+            let layout = Layout::new(&Desc { dimension:dim, width:w, height:hgt,
+                depth, mips, element_bytes:elem, block, samples:1,
+                swizzle:Swizzle::LINEAR }).unwrap();
+            let volume = dim == Dimension::Tex3d;
+            let d = D3D12_RESOURCE_DESC {
+                Dimension: if volume { D3D12_RESOURCE_DIMENSION_TEXTURE3D }
+                           else { D3D12_RESOURCE_DIMENSION_TEXTURE2D },
+                Width:u64::from(w), Height:hgt, DepthOrArraySize:depth as u16,
+                MipLevels:mips as u16, Format:format,
+                SampleDesc:DXGI_SAMPLE_DESC { Count:1, Quality:0 },
+                Layout:D3D12_TEXTURE_LAYOUT_UNKNOWN, ..Default::default()
+            };
+            let count = if volume { mips } else { mips * depth };
+            let mut fp = vec![D3D12_PLACED_SUBRESOURCE_FOOTPRINT::default(); count as usize];
+            let mut rows = vec![0u32; count as usize];
+            let mut active = vec![0u64; count as usize];
+            let mut total = 0;
+            unsafe {
+                h.device.GetCopyableFootprints(&d, 0, count, 0, Some(fp.as_mut_ptr()),
+                    Some(rows.as_mut_ptr()), Some(active.as_mut_ptr()), Some(&mut total));
+            }
+            assert_eq!(total,want_total);
+            assert_eq!(staging_extent(total,&fp,&rows,&active,&layout,mips),Some(want_full));
+            let mut bad = active.clone();
+            bad[0] = bad[0].checked_add(1).unwrap();
+            assert_eq!(staging_extent(total,&fp,&rows,&bad,&layout,mips),None);
+            eprintln!("staging_extent {:?} {w}x{hgt}x{depth} mips={mips} elem={elem} block={block} total={total} full={want_full}", dim);
+        }
     }
 
     struct Reservation(*mut core::ffi::c_void);
@@ -80,16 +124,25 @@ mod ai2_staging_bounds_allocation {
         let old_bytes = STAGED[1].load(Relaxed);
         STAGED[0].fetch_add(1, Relaxed);
         STAGED[1].fetch_add(total, Relaxed);
-        let staging = Staging {
+        let mut staging = Staging {
             buffer, size: required, data, footprints, rows, layout,
             mips: 1, bytes: total, memory: reserve.0.cast(), last: Mutex::default(),
             dirty: AtomicBool::new(false), uploaded: AtomicBool::new(false),
-            used: AtomicU64::new(0), on_demand: true, detiled: AtomicU32::new(0),
+            used: AtomicU64::new(0), on_demand: false, detiled: AtomicU32::new(0),
             judged: [const { AtomicU64::new(0) }; 2], waiting: AtomicU64::new(0), pooled,
         };
         // Entire width was checked above. Fill a sentinel over the full
         // owned allocation; on-demand zeroing must clear exactly required.
         unsafe { std::ptr::write_bytes(data, 0xa5, width as usize); }
+        staging.detile(&src);
+        let contents = unsafe { std::slice::from_raw_parts(data, width as usize) };
+        for (i, &b) in contents.iter().enumerate() {
+            let active = i < 4 || (256..260).contains(&i);
+            assert_eq!(b, if active { 0x5a } else { 0xa5 }, "detile byte {i}");
+        }
+        // Only test toggles this private state; real staging chooses it
+        // at creation. The reserved address has no held level.
+        staging.on_demand = true;
         staging.detile(&src);
         assert_eq!(staging.detiled.load(Relaxed), 0);
         let contents = unsafe { std::slice::from_raw_parts(data, width as usize) };
