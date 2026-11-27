@@ -80,6 +80,7 @@ COUNTERS = {
     "mapping diff run totals": ("runs", "pages"),
     "texture view estimate hits": ("hits",),
     "alias direct run totals": ("attempts", "hits"),
+    "exact placeholder totals": ("attempts", "hits"),
 }
 def update_counters(latest, line):
     for message, fields in COUNTERS.items():

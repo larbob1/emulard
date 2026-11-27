@@ -108,6 +108,10 @@ class FrameReportTests(unittest.TestCase):
         result = summarize(["alias direct run totals attempts=2 hits=1", "alias direct run totals attempts=4 hits=3"])
         self.assertEqual(result["latest_cumulative_counters"]["alias direct run totals"], {"attempts": 4, "hits": 3})
 
+    def test_exact_placeholder_counter(self):
+        result = summarize(["exact placeholder totals attempts=8 hits=7"])
+        self.assertEqual(result["latest_cumulative_counters"]["exact placeholder totals"], {"attempts": 8, "hits": 7})
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 
