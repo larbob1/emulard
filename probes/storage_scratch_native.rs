@@ -101,6 +101,65 @@ fn storage_scratch_native_file_parity() {
     release(file.cast::<Instance<File>>());
 }
 
+// Reuses the page helper from the historical native-passing codec fixture.
+struct ScratchNativePages {
+    ids: [usize; 2],
+    separate: bool,
+}
+
+impl ScratchNativePages {
+    fn new(separate: bool) -> Self {
+        use super::super::xmem;
+        let mut ids = [0usize; 2];
+        if separate {
+            for id in &mut ids {
+                let mut n = 1;
+                assert_eq!(xmem::XMemAllocatePhysicalPages(0, &mut n, id), 1);
+                assert_eq!(n, 1);
+            }
+        } else {
+            let mut n = ids.len();
+            assert_eq!(xmem::XMemAllocatePhysicalPages(0, &mut n, ids.as_mut_ptr()), 1);
+            assert_eq!(n, 2);
+        }
+        Self { ids, separate }
+    }
+
+    fn reset(&self) {
+        use super::super::xmem;
+        for (id, offset) in self.ids.iter().zip([PAGE - 16, 0]) {
+            let mut window = xmem::page_window(std::slice::from_ref(id), offset, 16).unwrap();
+            window.bytes().fill(0xA5);
+        }
+    }
+
+    fn seen(&self) -> [u8; 32] {
+        use super::super::xmem;
+        let mut out = [0u8; 32];
+        for ((id, offset), chunk) in self.ids.iter().zip([PAGE - 16, 0])
+            .zip(out.chunks_exact_mut(16)) {
+            let mut window = xmem::page_window(std::slice::from_ref(id), offset, 16).unwrap();
+            chunk.copy_from_slice(window.bytes());
+        }
+        out
+    }
+
+    fn assert_path(&self) {
+        use super::super::xmem;
+        // The real page_window result establishes the path in this isolated
+        // fixture, not whether a particular gameplay request takes it.
+        assert_eq!(xmem::page_window(&self.ids, PAGE - 8, 16).is_some(), !self.separate);
+    }
+}
+
+impl Drop for ScratchNativePages {
+    fn drop(&mut self) {
+        use super::super::xmem;
+        // No title view or temporary window is retained across this call.
+        assert_eq!(xmem::XMemFreePhysicalPages(self.ids.len(), self.ids.as_ptr()), 1);
+    }
+}
+
 #[test]
 #[ignore = "isolated native scratch nonbounce and cleanup parity"]
 fn storage_scratch_native_nonbounce() {
@@ -111,6 +170,8 @@ fn storage_scratch_native_nonbounce() {
     let r = request(0, out.as_mut_ptr().cast(), out.len(), file.cast_const(), 0, 4096);
     assert_eq!(execute_scratch_review(&r, &mut scratch), Ok(()));
     let retained = scratch.idle.capacity();
+    let retained_ptr = scratch.idle.as_ptr();
+    let retained_hits = scratch.hits;
     assert!(retained >= 4096);
     let mut baseline = [0xA5; 48];
     let mut candidate = baseline;
@@ -136,6 +197,72 @@ fn storage_scratch_native_nonbounce() {
     assert_eq!(candidate, baseline);
     assert_eq!(scratch.calls, 1);
     assert_eq!(scratch.idle.capacity(), retained);
+
+    // File-owned compressed source must not acquire or evict the raw slot.
+    let mut bad = packed.clone();
+    *bad.last_mut().unwrap() ^= 1;
+    for (source, expected) in [
+        (packed.as_slice(), Ok(())),
+        (bad.as_slice(), Err(INVALID_DATA)),
+        (packed.as_slice(), Ok(())),
+    ] {
+        let (_packed_dir, packed_file) = file_with(source);
+        let mut baseline = [0xA5; 32];
+        let mut candidate = baseline;
+        let mut r = request(ZLIB, baseline[8..24].as_mut_ptr().cast(),
+            16, packed_file.cast_const(), 0, source.len());
+        assert_eq!(execute(&r), expected);
+        r.destination = candidate[8..24].as_mut_ptr().cast();
+        assert_eq!(execute_scratch_review(&r, &mut scratch), expected);
+        assert_eq!(candidate, baseline);
+        assert_eq!(&candidate[..8], &[0xA5; 8]);
+        assert_eq!(&candidate[24..], &[0xA5; 8]);
+        if expected.is_ok() {
+            assert_eq!(&candidate[8..24], &bytes[..16]);
+        }
+        assert_eq!(scratch.calls, 1);
+        assert_eq!(scratch.hits, retained_hits);
+        assert_eq!(scratch.idle.capacity(), retained);
+        assert_eq!(scratch.idle.as_ptr(), retained_ptr);
+        release(packed_file.cast::<Instance<File>>());
+    }
+
+    // Raw file-to-page requests bypass the address bounce even when the
+    // physical fallback itself allocates a temporary destination buffer.
+    for separate in [false, true] {
+        let mut pages = ScratchNativePages::new(separate);
+        pages.assert_path();
+        for (offset, expected) in [
+            (0usize, Ok(())),
+            (bytes.len() - 3, Err(END_OF_FILE)),
+            (17, Ok(())),
+        ] {
+            pages.reset();
+            let mut r = request(PAGE_DESTINATION, pages.ids.as_mut_ptr().cast(),
+                16, file.cast_const(), offset as u64, 16);
+            r.page_offset = (PAGE - 8) as u64;
+            assert_eq!(execute(&r), expected);
+            let baseline = pages.seen();
+            pages.reset();
+            assert_eq!(execute_scratch_review(&r, &mut scratch), expected);
+            let candidate = pages.seen();
+            assert_eq!(candidate, baseline);
+            assert_eq!(&candidate[..8], &[0xA5; 8]);
+            assert_eq!(&candidate[24..], &[0xA5; 8]);
+            if expected.is_ok() {
+                assert_eq!(&candidate[8..24], &bytes[offset..offset + 16]);
+            } else if separate {
+                // A failed read into disjoint fallback is not published.
+                assert_eq!(&candidate[8..24], &[0xA5; 16]);
+            }
+            // For direct physical EOF, compare actual baseline bytes,
+            // without assuming how many bytes the host read before EOF.
+            assert_eq!(scratch.calls, 1);
+            assert_eq!(scratch.hits, retained_hits);
+            assert_eq!(scratch.idle.capacity(), retained);
+            assert_eq!(scratch.idle.as_ptr(), retained_ptr);
+        }
+    }
     scratch.trim();
     assert_eq!(scratch.idle.capacity(), 0);
     release(file.cast::<Instance<File>>());
