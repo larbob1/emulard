@@ -113,6 +113,14 @@ class BenchmarkPairsTests(unittest.TestCase):
         result = aggregate([(a, b)])
         self.assertEqual(result["candidate_pairs_with_unknown_shader_warning_counts"], 1)
 
+    def test_dirty_observations_remain_separate_in_pair(self):
+        a = summarize([sample(300)])
+        b = summarize([sample(150), "dirty_observe_v1 path=2 samples=1 bytes=4 chunks=1 unequal=1"])
+        result = aggregate([(a, b)])["runs"][0]
+        self.assertEqual(result["baseline_dirty_observation"]["paths"], {})
+        self.assertEqual(result["candidate_dirty_observation"]["paths"]["2"]["latest"]["bytes"], 4)
+        self.assertEqual(result["candidate_dirty_observation"]["message_lines"], 1)
+
     def test_empty_input(self):
         with self.assertRaises(ValueError):
             aggregate([])

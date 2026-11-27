@@ -233,5 +233,43 @@ class ShaderWarningTests(unittest.TestCase):
         self.assertEqual(summarize([sample()])["shader_translation_drop_warning_lines"], 0)
 
 
+class DirtyObservationTests(unittest.TestCase):
+    def test_per_path_snapshots_and_noncoherent_fields(self):
+        lines = ["private-prefix dirty_observe_v1 path=0 samples=1 bytes=10 chunks=2 unequal=3",
+                 "dirty_observe_v1 path=1 samples=4096 bytes=268435456 chunks=65536 unequal=65536",
+                 "dirty_observe_v1 path=0 samples=2 bytes=9 chunks=4 unequal=5",
+                 sample()]
+        result = summarize(lines, skip=1)
+        observed = result["dirty_observation"]
+        self.assertEqual(observed["message_lines"], 3)
+        self.assertEqual(observed["invalid_records"], 0)
+        self.assertEqual(observed["paths"]["0"], {
+            "valid_records": 2, "descending_records": 1,
+            "latest": {"samples": 2, "bytes": 9, "chunks": 4, "unequal": 5}})
+        self.assertEqual(observed["paths"]["1"]["valid_records"], 1)
+        self.assertNotIn("2", observed["paths"])
+        self.assertNotIn("private-prefix", str(result))
+        self.assertEqual(summarize([])["dirty_observation"]["paths"], {})
+
+    def test_invalid_payloads_are_counted_without_exporting(self):
+        valid = "dirty_observe_v1 path=0 samples=1 bytes=2 chunks=1 unequal=1"
+        bad = [valid.replace("path=0", "path=3"),
+               valid.replace("samples=1", "samples=4097"),
+               valid.replace("bytes=2", "bytes=268435457"),
+               valid.replace("chunks=1", "chunks=65537"),
+               valid.replace("unequal=1", "unequal=65537"),
+               valid.replace("bytes=2", "bytes=-2"),
+               valid.replace("bytes=2", "bytes=2.0"),
+               valid.replace("bytes=2", "bytes=12345678901234567890"),
+               valid.replace("bytes=2", "bytes=2 bytes=3"),
+               valid.replace(" bytes=2", ""),
+               valid + " secret=private-payload", valid + " " + valid]
+        result = summarize(bad + [valid, "not_dirty_observe_v1 "])
+        self.assertEqual(result["dirty_observation"]["message_lines"], len(bad) + 1)
+        self.assertEqual(result["dirty_observation"]["invalid_records"], len(bad))
+        self.assertEqual(result["dirty_observation"]["paths"]["0"]["valid_records"], 1)
+        self.assertNotIn("private-payload", str(result))
+
+
 if __name__ == "__main__":
     unittest.main()

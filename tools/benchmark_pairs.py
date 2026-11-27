@@ -43,6 +43,8 @@ def aggregate(pairs, visible=False):
             "candidate_latest_cumulative_counters": candidate.get("latest_cumulative_counters", {}),
             "baseline_cumulative_counter_observations": baseline.get("cumulative_counter_observations", {}),
             "candidate_cumulative_counter_observations": candidate.get("cumulative_counter_observations", {}),
+            "baseline_dirty_observation": baseline.get("dirty_observation"),
+            "candidate_dirty_observation": candidate.get("dirty_observation"),
             "baseline_critical_path_evidence": baseline.get("critical_path_evidence"),
             "candidate_critical_path_evidence": candidate.get("critical_path_evidence"),
             "interval_comparison_usable": interval_usable,
@@ -73,7 +75,7 @@ def aggregate(pairs, visible=False):
         "at_least_three_usable_interval_pairs": len(intervals) >= 3,
         "at_least_three_usable_individual_pairs": len(frames) >= 3,
         "operator_reported_visible_scene": visible,
-        "note": "Operator must match scene/settings/warmup and independent runs. Distinct log contents do not prove independent trials or matched workloads. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. Shader warning lines cover the entire supplied input including warmup; no known warning is not proof of rendering correctness. This report is not a release gate.",
+        "note": "Operator must match scene/settings/warmup and independent runs. Distinct log contents do not prove independent trials or matched workloads. Ratios exclude unusable populations, not whole runs; counts expose missing evidence. Interval averages are not individual frames; rounded present rates are not visible gameplay FPS. Visibility is self-reported. Shader warning lines cover the entire supplied input including warmup; no known warning is not proof of rendering correctness. Dirty observation is diagnostic-only; no speedup ratio certifies an instrumented trial. This report is not a release gate.",
     }
 
 def read_distinct_log(path, seen_paths, seen_contents, skip, skip_frame_batches, target_fps):

@@ -14,7 +14,8 @@ MILESTONES = (5, 10, 20, 30)
 CONFIG_FIELDS = ("revision", "platform", "driver", "hardware", "profile", "scene",
                  "settings", "cache_state", "flags", "resolution", "warmup")
 CHECKS = ("full_scene", "responsive_controls", "no_crash", "no_missing_required_draws",
-          "no_invalid_memory_access", "measured_window_matches_log", "independent_trial")
+          "no_invalid_memory_access", "measured_window_matches_log", "independent_trial",
+          "experimental_observation_disabled")
 
 
 def number(value):
@@ -69,6 +70,13 @@ def run_evidence(run, report):
         # Translation failures may concern unused/optional shaders. Do not
         # infer executed required draws, but do not certify this trial either.
         reasons.append("shader_translation_drop_warning_observed")
+    dirty = report.get("dirty_observation")
+    dirty_lines = dirty.get("message_lines") if isinstance(dirty, dict) else None
+    if type(dirty_lines) is not int or dirty_lines < 0:
+        reasons.append("experimental_observation_evidence_missing")
+        dirty_lines = None
+    elif dirty_lines:
+        reasons.append("experimental_dirty_observation_detected")
     p = frames.get("frame_ms_percentiles", {})
     p95, p99 = p.get("p95"), p.get("p99")
     if not number(p95) or not number(p99):
@@ -93,6 +101,7 @@ def run_evidence(run, report):
         "p99_ms": p99,
         "reported_drop_intervals": drops,
         "shader_translation_drop_warning_lines": shader_warnings,
+        "dirty_observation_message_lines": dirty_lines,
         "evidence_issues": reasons,
         "correctness_failures": failures,
         "milestones": {

@@ -75,6 +75,16 @@ class AcceptanceTests(unittest.TestCase):
         manifest["runs"][0]["checks"]["full_scene"] = False
         self.assertEqual(self.assess(manifest, lines)["milestones"]["30"]["status"], "failed")
 
+    def test_experimental_observation_cannot_certify_performance(self):
+        manifest, lines = fixture()
+        for observation in ("dirty_observe_v1 path=0 samples=0 bytes=0 chunks=0 unequal=0",
+                            "dirty_observe_v1 malformed"):
+            result = self.assess(manifest, lines + [observation])
+            self.assertEqual(result["milestones"]["30"]["status"], "insufficient_evidence")
+            self.assertIn("experimental_dirty_observation_detected", result["runs"][0]["evidence_issues"])
+        manifest["runs"][0]["checks"].pop("experimental_observation_disabled")
+        self.assertEqual(self.assess(manifest, lines)["milestones"]["30"]["status"], "insufficient_evidence")
+
     def test_missing_and_inconsistent_evidence(self):
         manifest, lines = fixture()
         self.assertEqual(self.assess(manifest, lines[:1])["milestones"]["30"]["status"], "insufficient_evidence")

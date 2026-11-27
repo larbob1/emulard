@@ -31,3 +31,29 @@ failures. Retain and review startup logs locally as part of operator checks.
 Never infer correctness from interval counters alone. Only counts are exported;
 no warning details, identities, paths or title data. This is a conservative
 review gate, not a new runtime telemetry producer or FPS optimization.
+
+## Diagnostic-only observation exclusion (D12)
+
+Every trial now needs the operator check experimental_observation_disabled:
+true only if experimental CPU trace, dirty observation, and other added
+measurement probes not approved for formal acceptance were disabled.
+Existing baseline frame logging remains required. Missing this new check
+makes older manifests insufficient until the operator confirms it; never
+fill it automatically. A dirty_observe_v1 message in supplied logs, even a
+zero or malformed snapshot, also disqualifies the trial as insufficient.
+The separate CPU trace file is not detectable in ordinary frame logs; the
+operator must verify flags and build. Missing observation lines are not proof
+of disabled instrumentation. Keep diagnostic runs distinct from milestone
+runs.
+
+Proposed AI2 #28 41e4cbf5 schema is parsed offline only. Path 0 = selected
+copy-back pieces, 1 = card merge, 2 = relay merge. Exact numeric fields with
+independent absolute caps (4096 completed samples, 268435456 compared bytes,
+65536 chunks and unequal chunks per path), latest row and valid/descending
+records per path, malformed count globally. No cross-field constraints due
+to independently loaded atomics. No path sums, deltas, ratios, admission or
+contention inference. Missing path is unavailable. Chunk is slice-relative
+4KiB, not a unique backing page; path 0 biased to selected differences.
+All supplied log lines including warmup are inspected; strict payload parser
+can reject decorated or version-changed messages. No raw payload exported.
+This is schema/acceptance work, not authorization to integrate the producer.

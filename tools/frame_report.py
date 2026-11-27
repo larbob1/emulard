@@ -177,6 +177,46 @@ def update_counters(latest, line, quality=None):
         latest[message] = values
 
 
+# Review-only AI2 dirty_observe_v1 schema (#28 41e4cbf5).
+# Each absolute cap is independent; concurrent relaxed reads are not a
+# coherent row and do not support cross-field checks or ratios.
+DIRTY_MARKER = re.compile(r"(?:^|\s)dirty_observe_v1(?=\s|$)")
+DIRTY_FIELDS = ("path", "samples", "bytes", "chunks", "unequal")
+DIRTY_CAPS = (2, 4096, 268435456, 65536, 65536)
+
+
+def update_dirty_observation(report, line):
+    markers = list(DIRTY_MARKER.finditer(line))
+    if not markers:
+        return
+    report["message_lines"] += 1
+    if len(markers) != 1:
+        report["invalid_records"] += 1
+        return
+    payload = line[markers[0].end():].split()
+    fields = {}
+    for token in payload:
+        key, sep, raw = token.partition("=")
+        # Only the exact proposed numeric payload; fail closed on extras.
+        if (not sep or key not in DIRTY_FIELDS or key in fields
+                or not re.fullmatch(r"[0-9]{1,10}", raw)):
+            report["invalid_records"] += 1
+            return
+        fields[key] = int(raw)
+    if (len(fields) != len(DIRTY_FIELDS) or
+            any(fields[k] > cap for k, cap in zip(DIRTY_FIELDS, DIRTY_CAPS))):
+        report["invalid_records"] += 1
+        return
+    path = str(fields.pop("path"))
+    row = report["paths"].setdefault(path, {
+        "valid_records": 0, "descending_records": 0, "latest": None})
+    old = row["latest"]
+    if old is not None and any(fields[k] < old[k] for k in fields):
+        row["descending_records"] += 1
+    row["valid_records"] += 1
+    row["latest"] = fields
+
+
 # Pinned victory-gpu pipeline.rs translation Err warning. Only count lines;
 # shader identities, error payloads and raw text never leave the parser.
 SHADER_DROP_WARNING = "shader does not translate; its pipelines' draws are dropped"
@@ -191,6 +231,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     rows = []
     seen = invalid_intervals = skipped_intervals = 0
     shader_drop_warning_lines = 0
+    dirty_observation = {"message_lines": 0, "invalid_records": 0, "paths": {}}
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
@@ -206,6 +247,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     for line in lines:
         if SHADER_DROP_WARNING in line:
             shader_drop_warning_lines += 1
+        update_dirty_observation(dirty_observation, line)
         update_counters(cumulative, line, counter_quality)
         if "frame times:" in line:
             detail_header_seen = True
@@ -284,6 +326,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     }
     detailed = {"individual_frame_times": actual,
                 "shader_translation_drop_warning_lines": shader_drop_warning_lines,
+                "dirty_observation": dirty_observation,
+                "dirty_observation_note": "Diagnostic only, all supplied lines including warmup. Paths 0/1/2 have independent cumulative snapshots, not coherent or exhaustive samples. Missing paths unavailable; slice-relative chunks are not unique backing pages, unequal is not GPU-only dirtiness. No ratios, deltas, sums, bandwidth or skip eligibility.",
                 "shader_translation_warning_note": "Known pinned warning message lines in the entire supplied log, including warmup. Not unique shaders, executed draws, or exit cause. Zero means no matching message observed, not proven translation success.", "latest_cumulative_counters": cumulative,
                 "cumulative_counter_observations": counter_quality,
                 "cumulative_counter_note": "Latest observed sampled process totals, including warmup; not exact window totals. Missing records are unknown. Nonmonotonic observations may reflect reset or concurrent log order. Scatter batches/pages/failures are logical operations, not host syscalls.",
