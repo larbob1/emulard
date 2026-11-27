@@ -55,7 +55,11 @@ def run_stage(label, args, cwd):
             last_switches = None
             failed_tests = set()
             failed_groups = []
+            alias_checks = []
             for line in output:
+                alias = re.search(rb"\balias-check-(4[0-2]|5[1-8]) page ([0-2])\b", line)
+                if alias:
+                    alias_checks.append(f"step={alias[1].decode('ascii')} page={alias[2].decode('ascii')}")
                 group = re.fullmatch(rb"Runtime validation failed: ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
                 if group:
                     failed_groups.append(group[1].decode("ascii"))
@@ -129,6 +133,8 @@ def run_stage(label, args, cwd):
                 print("Runtime test switches: " + last_switches)
             if panic_locations:
                 print("Runtime panic locations: " + ", ".join(sorted(panic_locations)))
+            if alias_checks:
+                print("Failed synthetic alias checks: " + ", ".join(alias_checks))
             if failed_groups:
                 print("Failed validation groups: " + ", ".join(failed_groups))
             if failed_tests:
