@@ -33,14 +33,18 @@ def test_result_counts(output):
     return [(int(passed), int(failed)) for passed, failed in
             re.findall(r"test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;", output)]
 
-def test_suite(target, package, suite, *, env=None, diagnostics=False):
+def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=None, ignored=False):
     command = ["cargo", "test", "--locked", "-p", package, "--lib"]
     if diagnostics:
         command.extend(["--features", "diagnostics"])
     command.append(suite)
+    if ignored:
+        if not diagnostics or expected != 1 or env is None or env.get("VICTORY_D3D12_WARP") != "1" or suite != "heap_recording_observation_same_frame_refresh_and_skip":
+            raise ValueError("isolated ignored WARP fixture requires explicit software-adapter, diagnostics and count-one gate")
+        command.extend(["--", "--ignored", "--test-threads=1"])
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS", "VICTORY_D3D12_WARP")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -53,9 +57,15 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
     print(result.stdout, end="", flush=True)
     result.check_returncode()
     counts = test_result_counts(result.stdout)
-    if not counts or sum(passed for passed, _ in counts) == 0 or any(failed for _, failed in counts):
+    passed = sum(p for p, _ in counts)
+    failed = sum(f for _, f in counts)
+    if not counts or passed == 0 or failed:
         print(f"Runtime test matched no passing tests: {package} {suite}", flush=True)
         raise subprocess.CalledProcessError(1, command)
+    if expected is not None and (len(counts) != 1 or passed != expected):
+        print(f"Runtime test count mismatch: {package} {suite} expected={expected} passed={passed}", flush=True)
+        raise subprocess.CalledProcessError(1, command)
+    print(f"Runtime test counts: {package} {suite} passed={passed} failed={failed}", flush=True)
 
 def validate_paired(target, *, keep_going=False):
     failures = []
@@ -70,8 +80,8 @@ def validate_paired(target, *, keep_going=False):
             failures.append(label)
             print(f"Runtime validation failed: {label}", flush=True)
 
-    def suite(package, name, *, env=None, diagnostics=False):
-        attempt(f"{package} {name}", lambda: test_suite(target, package, name, env=env, diagnostics=diagnostics))
+    def suite(package, name, *, env=None, diagnostics=False, expected=None, ignored=False):
+        attempt(f"{package} {name}", lambda: test_suite(target, package, name, env=env, diagnostics=diagnostics, expected=expected, ignored=ignored))
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
         suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
@@ -108,6 +118,8 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-gpu", name)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
+    warp_env = dict(os.environ, VICTORY_D3D12_WARP="1")
+    suite("victory-gpu", "heap_recording_observation_same_frame_refresh_and_skip", env=warp_env, diagnostics=True, expected=1, ignored=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:
