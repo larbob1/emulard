@@ -77,6 +77,13 @@ def run_evidence(run, report):
         dirty_lines = None
     elif dirty_lines:
         reasons.append("experimental_dirty_observation_detected")
+    library = report.get("pipeline_library_init")
+    library_lines = library.get("message_lines") if isinstance(library, dict) else None
+    if type(library_lines) is not int or library_lines < 0:
+        reasons.append("library_init_observation_evidence_missing")
+        library_lines = None
+    elif library_lines:
+        reasons.append("experimental_library_init_observation_detected")
     p = frames.get("frame_ms_percentiles", {})
     p95, p99 = p.get("p95"), p.get("p99")
     if not number(p95) or not number(p99):
@@ -102,6 +109,7 @@ def run_evidence(run, report):
         "reported_drop_intervals": drops,
         "shader_translation_drop_warning_lines": shader_warnings,
         "dirty_observation_message_lines": dirty_lines,
+        "pipeline_library_init_message_lines": library_lines,
         "evidence_issues": reasons,
         "correctness_failures": failures,
         "milestones": {

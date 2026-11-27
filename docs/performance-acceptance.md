@@ -57,3 +57,17 @@ contention inference. Missing path is unavailable. Chunk is slice-relative
 All supplied log lines including warmup are inspected; strict payload parser
 can reject decorated or version-changed messages. No raw payload exported.
 This is schema/acceptance work, not authorization to integrate the producer.
+
+## Pipeline library initialization observation (#37)
+
+AI2 #37 7009627a proposes a failure-only diagnostic with numeric phase
+0 (Device1 query), 1 (empty CreatePipelineLibrary), 2 (Library1 query),
+and signed i32 HRESULT. Accept the full signed range including zero because
+the producer observes Result::Err, not a sign test. Exact payload, bounded
+per-phase latest code/count, invalid message count. No driver cause inferred.
+Absence may mean disabled, bypass, missing host, success, or missing logs;
+it does not prove a library exists. Observations include warmup. Formal
+acceptance refuses any marker (including malformed); older report objects
+without the field are insufficient. Operator experimental_observation_disabled
+must also confirm this probe is disabled. No registration or local launch
+authorization follows from schema approval. B003 failure reason still unknown.

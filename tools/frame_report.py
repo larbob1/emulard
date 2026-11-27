@@ -217,6 +217,25 @@ def update_dirty_observation(report, line):
     row["latest"] = fields
 
 
+# AI2 #37: failure-only diagnostic, bounded per-phase storage.
+LIBRARY_INIT_MARKER = re.compile(r"(?:^|\s)pipeline_library_init_v1(?=\s|$)")
+LIBRARY_INIT_PAYLOAD = re.compile(r"\s+phase=([0-2])\s+hresult=(-?[0-9]{1,10})\s*$")
+
+
+def update_library_init(report, line):
+    markers = list(LIBRARY_INIT_MARKER.finditer(line))
+    if not markers:
+        return
+    report["message_lines"] += 1
+    payload = LIBRARY_INIT_PAYLOAD.fullmatch(line[markers[0].end():]) if len(markers) == 1 else None
+    if payload is None or not -(2**31) <= int(payload[2]) <= 2**31-1:
+        report["invalid_records"] += 1
+        return
+    row = report["phases"].setdefault(payload[1], {"valid_records": 0, "latest_hresult": None})
+    row["valid_records"] += 1
+    row["latest_hresult"] = int(payload[2])
+
+
 # Pinned victory-gpu pipeline.rs translation Err warning. Only count lines;
 # shader identities, error payloads and raw text never leave the parser.
 SHADER_DROP_WARNING = "shader does not translate; its pipelines' draws are dropped"
@@ -232,6 +251,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     seen = invalid_intervals = skipped_intervals = 0
     shader_drop_warning_lines = 0
     dirty_observation = {"message_lines": 0, "invalid_records": 0, "paths": {}}
+    library_init = {"message_lines": 0, "invalid_records": 0, "phases": {}}
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
@@ -248,6 +268,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         if SHADER_DROP_WARNING in line:
             shader_drop_warning_lines += 1
         update_dirty_observation(dirty_observation, line)
+        update_library_init(library_init, line)
         update_counters(cumulative, line, counter_quality)
         if "frame times:" in line:
             detail_header_seen = True
@@ -327,6 +348,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     detailed = {"individual_frame_times": actual,
                 "shader_translation_drop_warning_lines": shader_drop_warning_lines,
                 "dirty_observation": dirty_observation,
+                "pipeline_library_init": library_init,
+                "pipeline_library_init_note": "Diagnostic-only failure records, including warmup. Phase 0 Device1 query, 1 empty library creation, 2 Library1 query. Latest signed i32 code per phase; missing phase unavailable, absence not success. No driver cause or cache behavior inferred.",
                 "dirty_observation_note": "Diagnostic only, all supplied lines including warmup. Paths 0/1/2 have independent cumulative snapshots, not coherent or exhaustive samples. Missing paths unavailable; slice-relative chunks are not unique backing pages, unequal is not GPU-only dirtiness. No ratios, deltas, sums, bandwidth or skip eligibility.",
                 "shader_translation_warning_note": "Known pinned warning message lines in the entire supplied log, including warmup. Not unique shaders, executed draws, or exit cause. Zero means no matching message observed, not proven translation success.", "latest_cumulative_counters": cumulative,
                 "cumulative_counter_observations": counter_quality,
