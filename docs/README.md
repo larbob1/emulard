@@ -47,3 +47,9 @@ This is the project-level navigation on main. Runtime-specific documents are mai
 ## Development tree
 
 `tools/` holds preparation, patcher, test, report and launch scripts. `patches/` holds reviewed upstream transformations. `probes/` holds synthetic fixtures. `docs/` holds design and experiment notes. `.github/workflows/` holds CI definitions. These directories exist on development branches; main is currently documentation-only.
+
+## Multi-agent development
+
+[Coordination rules](https://github.com/larbob1/emulard/blob/coordination/AGENTS.md) · [Task ownership and onboarding](https://github.com/larbob1/emulard/tree/coordination/coordination) · [Workstream issues](https://github.com/larbob1/emulard/issues?q=is%3Aissue+is%3Aopen+%22%5BCoordination%5D%22)
+
+The coordination branch is the shared agent record. Main remains beginner-facing. All contributors must read the coordination rules before changing runtime code.
