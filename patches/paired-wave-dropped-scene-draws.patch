@@ -78,3 +78,573 @@
  }
  
  /// Counts a draw or dispatch of `this` intentionally skipped or dropped
+@@ -573,101 +585,115 @@
++// Arithmetic validation only: the caller still owns the ABI obligation
++// to supply live, readable storage for each nonempty descriptor.
++fn bytecode_extent_valid(code: &Bytecode) -> bool {
++    code.size == 0 || (!code.code.is_null()
++        && code.size <= isize::MAX as usize
++        && (code.code as usize).checked_add(code.size).is_some())
++}
++
+ /// The stage's container, if it has one.
+ fn copy(stage: &'static str, code: &Bytecode) -> Option<Arc<Shader>> {
+     if code.code.is_null() || code.size == 0 {
+         return None;
+     }
+     // SAFETY: the title passes `size` bytes of shader code.
+     Some(shader(stage, unsafe {
+         std::slice::from_raw_parts(code.code, code.size)
+     }))
+ }
+ 
+ fn hand_out(
+     shaders: Vec<Arc<Shader>>,
+     #[cfg(windows)] graphics: Option<Box<host::GraphicsState>>,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     tracing::trace!(?shaders, "pipeline state");
+     #[cfg(windows)]
+     let host = Arc::new(make::Pending::new(shaders.clone(), graphics));
+     #[cfg(windows)]
+     make::early(&host);
+     #[cfg(windows)]
+     let builder = of_builder(&shaders);
+     #[cfg(windows)]
+     if builder {
+         // Another stage: the group is looked at again at its next dispatch.
+         let mut b = BUILDER.lock().unwrap_or_else(|e| e.into_inner());
+         b.pipelines.push(host.clone());
+         b.whole = false;
+     }
+     let pipeline = Box::new(Pipeline {
+         object: Object::new(&FUNCTIONS),
+         packet: [0; 8],
+         #[cfg(windows)]
+         host,
+         #[cfg(windows)]
+         builder,
+         shaders,
+         bound: std::sync::atomic::AtomicBool::new(false),
+     });
+     object::hand_out(PIPELINE, pipeline, iid, &PIPELINE_IIDS, out)
+ }
+ 
+ /// Device method.
+ pub(crate) extern "system" fn create_graphics(
+     _: This,
+     desc: *const GraphicsHead,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
++    if !desc.stages.iter().all(bytecode_extent_valid) {
++        return E_INVALIDARG;
++    }
+     let stages = GRAPHICS_STAGES.iter().zip(&desc.stages);
+     let shaders = stages.filter_map(|(s, c)| copy(s, c)).collect();
+     hand_out(
+         shaders,
+         #[cfg(windows)]
+         None,
+         iid,
+         out,
+     )
+ }
+ 
+ /// Device method.
+ pub(crate) extern "system" fn create_compute(
+     _: This,
+     desc: *const ComputeHead,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
++    if !bytecode_extent_valid(&desc.stage) {
++        return E_INVALIDARG;
++    }
+     hand_out(
+         copy("compute", &desc.stage).into_iter().collect(),
+         #[cfg(windows)]
+         None,
+         iid,
+         out,
+     )
+ }
+ 
+ /// Device method 0x1f0: the plain compute description plus console
+ /// extensions `(desc, extension count, extensions, iid, out)`.
+ /// shortcut: the extensions (console shader settings) are ignored, as is
+ /// the rest of the description.
+ pub(crate) extern "system" fn create_compute_x(
+     this: This,
+     desc: *const ComputeHead,
+     _extensions: u32,
+     _extended: *const u8,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     create_compute(this, desc, iid, out)
+ }
+ 
+@@ -674,87 +700,104 @@
+ /// A pipeline described as a stream: its size and the subobjects, each a
+ /// type then its data, padded to 8 bytes.
+ #[repr(C)]
+ pub(crate) struct StreamDesc {
+     size: usize,
+     stream: *const u8,
+ }
+ 
+ /// A subobject type's size (type included), and the stage it is if it is a
+ /// shader. The console numbers amplification and mesh shaders 23 and 24
+ /// (PC: 24 and 25); its own types from 25 on are not sized yet.
+ fn subobject(kind: u32) -> Option<(usize, Option<&'static str>)> {
+     let stage = |name| Some((24, Some(name)));
+     match kind {
+         1 => stage("vertex"),
+         2 => stage("pixel"),
+         3 => stage("domain"),
+         4 => stage("hull"),
+         5 => stage("geometry"),
+         6 => stage("compute"),
+         23 => stage("amplification"),
+         24 => stage("mesh"),
+         0 => Some((16, None)),
+         12 | 19 => Some((24, None)),
+         7 | 15 => Some((40, None)),
+         8 => Some((336, None)),
+         10 => Some((48, None)),
+         11 => Some((56, None)),
+         17 => Some((16, None)),
+         21 => Some((64, None)),
+         22 => Some((32, None)),
+         9 | 13 | 14 | 16 | 18 | 20 => Some((8, None)),
+         _ => None,
+     }
+ }
+ 
+ /// Device method: a pipeline from a stream; the shaders are kept, and the
+ /// graphics state for the host pipeline.
+ pub(crate) extern "system" fn create_stream(
+     _: This,
+     desc: *const StreamDesc,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
+-    if desc.stream.is_null() {
++    if desc.stream.is_null() || desc.size > isize::MAX as usize
++        || (desc.stream as usize).checked_add(desc.size).is_none()
++    {
+         return E_INVALIDARG;
+     }
+     let mut shaders = Vec::new();
+     #[cfg(windows)]
+     let mut graphics = host::GraphicsState::default();
+     let mut at = 0;
+-    while at + 8 <= desc.size {
+-        // SAFETY: inside the stream the title passes.
++    while at < desc.size {
++        let remaining = desc.size - at;
++        if remaining < 8 {
++            tracing::warn!(at, remaining, "truncated pipeline subobject header");
++            return E_INVALIDARG;
++        }
++        // SAFETY: at least a complete header is inside the declared stream.
+         let kind = unsafe { desc.stream.add(at).cast::<u32>().read_unaligned() };
+         let Some((size, stage)) = subobject(kind) else {
+             tracing::warn!(
+                 kind,
+                 at,
+                 "pipeline subobject of unknown size; the rest is ignored"
+             );
+             break;
+         };
++        if size > remaining {
++            tracing::warn!(kind, at, size, remaining, "truncated pipeline subobject");
++            return E_INVALIDARG;
++        }
+         if let Some(stage) = stage {
+-            // SAFETY: a shader subobject has its bytecode at +8.
+-            let code = unsafe { &*desc.stream.add(at + 8).cast::<Bytecode>() };
+-            shaders.extend(copy(stage, code));
++            // SAFETY: the whole subobject fits, including bytecode at +8.
++            // Streams may arrive at an unaligned address.
++            let code = unsafe { desc.stream.add(at + 8).cast::<Bytecode>().read_unaligned() };
++            if !bytecode_extent_valid(&code) {
++                return E_INVALIDARG;
++            }
++            shaders.extend(copy(stage, &code));
+         }
+         #[cfg(windows)]
+         // SAFETY: a whole subobject of this kind lies at `at`.
+-        unsafe {
+-            graphics.read(kind, desc.stream.add(at))
+-        };
++        if !unsafe {
++            graphics.read(kind, desc.stream.add(at))
++        } {
++            return E_INVALIDARG;
++        }
+         at += size;
+     }
+     hand_out(
+         shaders,
+         #[cfg(windows)]
+         Some(Box::new(graphics)),
+         iid,
+         out,
+     )
+ }
+ 
+@@ -885,6 +928,147 @@
++    #[cfg(windows)]
++    #[test]
++    fn pipeline_stream_rejects_invalid_nested_input_layout() {
++        use windows::Win32::Graphics::Direct3D12::D3D12_INPUT_ELEMENT_DESC;
++        let align = std::mem::align_of::<D3D12_INPUT_ELEMENT_DESC>();
++        let bad_name = D3D12_INPUT_ELEMENT_DESC::default();
++        let good = D3D12_INPUT_ELEMENT_DESC {
++            SemanticName: windows::core::PCSTR(b"POSITION\0".as_ptr()),
++            ..Default::default()
++        };
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&12u32.to_le_bytes());
++        for (ptr, count) in [
++            (0usize, 1u32), (1, 1),
++            (usize::MAX & !(align - 1), 2),
++            (&raw const bad_name as usize, 1),
++        ] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..20].copy_from_slice(&count.to_le_bytes());
++            assert_eq!(stream_result(&bytes, 24), (E_INVALIDARG, std::ptr::null()));
++        }
++        for (ptr, count) in [(0usize, 0u32), (&raw const good as usize, 1)] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..20].copy_from_slice(&count.to_le_bytes());
++            let (hr, p) = stream_result(&bytes, 24);
++            assert_eq!(hr, S_OK);
++            assert!(!p.is_null());
++            assert_eq!(release(p), 0);
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_invalid_shader_extent() {
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        for (ptr, len) in [(0usize, 1usize), (1, isize::MAX as usize + 1), (usize::MAX - 1, 2)] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..24].copy_from_slice(&(len as u64).to_le_bytes());
++            assert_eq!(stream_result(&bytes, 24), (E_INVALIDARG, std::ptr::null()));
++        }
++        let desc = StreamDesc { size: 8, stream: (usize::MAX - 3) as *const u8 };
++        let mut p = std::ptr::null();
++        assert_eq!(create_stream(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++        assert!(p.is_null());
++    }
++
++    #[test]
++    fn pipeline_stream_plain_creators_reject_invalid_shader_extents() {
++        for (ptr, len) in [(0usize, 1usize), (1, isize::MAX as usize + 1), (usize::MAX - 1, 2)] {
++            let invalid = || Bytecode { code: ptr as *const u8, size: len };
++            let empty = || Bytecode { code: std::ptr::null(), size: 0 };
++            let desc = GraphicsHead {
++                root: std::ptr::null(),
++                stages: [empty(), empty(), empty(), empty(), invalid()],
++            };
++            let mut p = std::ptr::null();
++            assert_eq!(create_graphics(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert!(p.is_null());
++            let compute = ComputeHead { root: std::ptr::null(), stage: invalid() };
++            assert_eq!(create_compute(std::ptr::null(), &compute, &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert_eq!(create_compute_x(std::ptr::null(), &compute, 0, std::ptr::null(), &PIPELINE_IIDS[0], &mut p), E_INVALIDARG);
++            assert!(p.is_null());
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_preserves_absent_shader_stages() {
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        let (hr, p) = stream_result(&bytes, 24);
++        assert_eq!(hr, S_OK);
++        assert!(shaders(p).is_empty());
++        assert_eq!(release(p), 0);
++        let empty = Bytecode { code: usize::MAX as *const u8, size: 0 };
++        assert!(bytecode_extent_valid(&empty));
++    }
++
++    fn stream_result(bytes: &[u8], declared: usize) -> (HRESULT, This) {
++        let desc = StreamDesc { size: declared, stream: bytes.as_ptr() };
++        let mut p = std::ptr::null();
++        let hr = create_stream(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p);
++        (hr, p)
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_short_headers() {
++        let bytes = [0u8; 8];
++        for len in 1..8 {
++            assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()));
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_every_truncated_known_kind() {
++        for kind in 0u32..=24 {
++            let Some((size, _)) = subobject(kind) else { continue };
++            let mut bytes = vec![0u8; size];
++            bytes[..4].copy_from_slice(&kind.to_le_bytes());
++            for len in 8..size {
++                assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()),
++                    "kind {kind}, declared {len}, full size {size}");
++            }
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_truncation_after_valid_prefix() {
++        let mut bytes = [0u8; 32];
++        bytes[..4].copy_from_slice(&9u32.to_le_bytes());
++        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
++        for len in 9..32 {
++            assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()));
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_impossible_extent() {
++        let bytes = [0u8; 8];
++        assert_eq!(stream_result(&bytes, (isize::MAX as usize) + 1),
++            (E_INVALIDARG, std::ptr::null()));
++    }
++
++    #[test]
++    fn pipeline_stream_reads_unaligned_bytecode_and_preserves_unknown_stop() {
++        let code = [23u8, 42, 99];
++        let mut backing = [0u64; 5];
++        // SAFETY: backing has 40 writable bytes, offset one is unaligned.
++        let bytes = unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>().add(1), 32) };
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        bytes[8..16].copy_from_slice(&(code.as_ptr() as u64).to_le_bytes());
++        bytes[16..24].copy_from_slice(&(code.len() as u64).to_le_bytes());
++        bytes[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
++        for len in [24, 32] {
++            let (hr, p) = stream_result(bytes, len);
++            assert_eq!(hr, S_OK);
++            assert!(!p.is_null());
++            assert_eq!(shaders(p), [("vertex", code.to_vec())]);
++            assert_eq!(release(p), 0);
++        }
++    }
++
+     /// The stream layout the title builds (title+0x86f090): root
+     /// signature, five shader slots (the first a mesh shader), blend, sample
+     /// mask, rasterizer, depth-stencil 1, sample description, input layout,
+     /// topology, render target and depth formats: 0x2b0 bytes.
+     #[test]
+     fn streams_yield_their_shaders() {
+--- a/crates/victory-gpu/src/pipeline/host.rs
++++ b/crates/victory-gpu/src/pipeline/host.rs
+@@ -92,85 +92,107 @@
+ }
+ 
+-impl GraphicsState {
+-    /// Takes in one subobject of a stream: its type, then its data at +4
+-    /// (+8 for those holding pointers).
+-    ///
+-    /// # Safety
+-    /// `at` points at a whole subobject of type `kind`.
+-    pub(crate) unsafe fn read(&mut self, kind: u32, at: *const u8) {
+-        // SAFETY: the caller passes a whole subobject.
+-        unsafe {
+-            let data = at.add(4);
+-            match kind {
+-                8 => self.blend = data.cast::<D3D12_BLEND_DESC>().read_unaligned(),
+-                9 => self.sample_mask = data.cast::<u32>().read_unaligned(),
+-                10 => self.rasterizer = data.cast::<D3D12_RASTERIZER_DESC>().read_unaligned(),
+-                11 => {
+-                    self.depth = data.cast::<D3D12_DEPTH_STENCIL_DESC>().read_unaligned();
+-                    self.depth_bounds = false;
+-                }
+-                21 => {
+-                    let d = data.cast::<D3D12_DEPTH_STENCIL_DESC1>().read_unaligned();
+-                    self.depth_bounds = d.DepthBoundsTestEnable.as_bool();
+-                    self.depth = D3D12_DEPTH_STENCIL_DESC {
+-                        DepthEnable: d.DepthEnable,
+-                        DepthWriteMask: d.DepthWriteMask,
+-                        DepthFunc: d.DepthFunc,
+-                        StencilEnable: d.StencilEnable,
+-                        StencilReadMask: d.StencilReadMask,
+-                        StencilWriteMask: d.StencilWriteMask,
+-                        FrontFace: d.FrontFace,
+-                        BackFace: d.BackFace,
+-                    };
+-                }
+-                12 => {
+-                    let layout = at.add(8).cast::<D3D12_INPUT_LAYOUT_DESC>().read_unaligned();
+-                    if layout.pInputElementDescs.is_null() {
+-                        return;
+-                    }
+-                    let elements = std::slice::from_raw_parts(
+-                        layout.pInputElementDescs,
+-                        layout.NumElements as usize,
+-                    );
+-                    self.names = elements
+-                        .iter()
+-                        .map(|e| CStr::from_ptr(e.SemanticName.0.cast()).to_owned())
+-                        .collect();
+-                    self.inputs = elements
+-                        .iter()
+-                        .zip(&self.names)
+-                        .map(|(e, name)| D3D12_INPUT_ELEMENT_DESC {
+-                            SemanticName: PCSTR(name.as_ptr().cast()),
+-                            Format: DXGI_FORMAT(
+-                                crate::resource::pc_format(e.Format.0 as u32) as i32
+-                            ),
+-                            ..*e
+-                        })
+-                        .collect();
+-                }
+-                13 => {
+-                    self.strip_cut =
+-                        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE(data.cast::<i32>().read_unaligned())
+-                }
+-                14 => {
+-                    self.topology =
+-                        D3D12_PRIMITIVE_TOPOLOGY_TYPE(data.cast::<i32>().read_unaligned())
+-                }
+-                15 => {
+-                    self.targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
+-                    for f in &mut self.targets.RTFormats {
+-                        f.0 = crate::resource::target_format(crate::resource::pc_format(
+-                            f.0 as u32,
+-                        )) as i32;
+-                    }
+-                }
+-                16 => {
+-                    let f = data.cast::<u32>().read_unaligned();
+-                    self.depth_format = DXGI_FORMAT(crate::resource::pc_format(f) as i32);
+-                }
+-                17 => self.samples = data.cast::<DXGI_SAMPLE_DESC>().read_unaligned(),
+-                _ => {}
+-            }
+-        }
+-    }
++// Arithmetic only; readable, live external storage is still an ABI obligation.
++fn input_layout_extent_valid<T>(ptr: *const T, count: usize) -> bool {
++    if count == 0 {
++        return true;
++    }
++    let start = ptr as usize;
++    !ptr.is_null() && start % std::mem::align_of::<T>() == 0
++        && count.checked_mul(std::mem::size_of::<T>()).is_some_and(|bytes|
++            bytes <= isize::MAX as usize && start.checked_add(bytes).is_some())
++}
++
++impl GraphicsState {
++    /// Takes in one subobject of a stream: its type, then its data at +4
++    /// (+8 for those holding pointers).
++    ///
++    /// # Safety
++    /// `at` points at a whole subobject of type `kind`; nonempty nested
++    /// arrays and names must reference live readable storage.
++    pub(crate) unsafe fn read(&mut self, kind: u32, at: *const u8) -> bool {
++        // SAFETY: the caller passes a whole subobject.
++        unsafe {
++            let data = at.add(4);
++            match kind {
++                8 => self.blend = data.cast::<D3D12_BLEND_DESC>().read_unaligned(),
++                9 => self.sample_mask = data.cast::<u32>().read_unaligned(),
++                10 => self.rasterizer = data.cast::<D3D12_RASTERIZER_DESC>().read_unaligned(),
++                11 => {
++                    self.depth = data.cast::<D3D12_DEPTH_STENCIL_DESC>().read_unaligned();
++                    self.depth_bounds = false;
++                }
++                21 => {
++                    let d = data.cast::<D3D12_DEPTH_STENCIL_DESC1>().read_unaligned();
++                    self.depth_bounds = d.DepthBoundsTestEnable.as_bool();
++                    self.depth = D3D12_DEPTH_STENCIL_DESC {
++                        DepthEnable: d.DepthEnable,
++                        DepthWriteMask: d.DepthWriteMask,
++                        DepthFunc: d.DepthFunc,
++                        StencilEnable: d.StencilEnable,
++                        StencilReadMask: d.StencilReadMask,
++                        StencilWriteMask: d.StencilWriteMask,
++                        FrontFace: d.FrontFace,
++                        BackFace: d.BackFace,
++                    };
++                }
++                12 => {
++                    let layout = at.add(8).cast::<D3D12_INPUT_LAYOUT_DESC>().read_unaligned();
++                    let count = layout.NumElements as usize;
++                    if !input_layout_extent_valid(layout.pInputElementDescs, count) {
++                        return false;
++                    }
++                    if count == 0 {
++                        // Preserve the existing null/empty layout behavior.
++                        if !layout.pInputElementDescs.is_null() {
++                            self.inputs.clear();
++                            self.names.clear();
++                        }
++                        return true;
++                    }
++                    let elements = std::slice::from_raw_parts(layout.pInputElementDescs, count);
++                    if elements.iter().any(|e| e.SemanticName.0.is_null()) {
++                        return false;
++                    }
++                    self.names = elements
++                        .iter()
++                        .map(|e| CStr::from_ptr(e.SemanticName.0.cast()).to_owned())
++                        .collect();
++                    self.inputs = elements
++                        .iter()
++                        .zip(&self.names)
++                        .map(|(e, name)| D3D12_INPUT_ELEMENT_DESC {
++                            SemanticName: PCSTR(name.as_ptr().cast()),
++                            Format: DXGI_FORMAT(
++                                crate::resource::pc_format(e.Format.0 as u32) as i32
++                            ),
++                            ..*e
++                        })
++                        .collect();
++                }
++                13 => {
++                    self.strip_cut =
++                        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE(data.cast::<i32>().read_unaligned())
++                }
++                14 => {
++                    self.topology =
++                        D3D12_PRIMITIVE_TOPOLOGY_TYPE(data.cast::<i32>().read_unaligned())
++                }
++                15 => {
++                    self.targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
++                    for f in &mut self.targets.RTFormats {
++                        f.0 = crate::resource::target_format(crate::resource::pc_format(
++                            f.0 as u32,
++                        )) as i32;
++                    }
++                }
++                16 => {
++                    let f = data.cast::<u32>().read_unaligned();
++                    self.depth_format = DXGI_FORMAT(crate::resource::pc_format(f) as i32);
++                }
++                17 => self.samples = data.cast::<DXGI_SAMPLE_DESC>().read_unaligned(),
++                _ => {}
++            }
++        }
++        true
++    }
+ 
