@@ -57,3 +57,11 @@ jobs:
             grep -E '^error\[E[0-9]+\]|^test result:|^Portable copy helper validation failed' "$RUNNER_TEMP/copy-tests.log" || true
             exit 1
           fi
+      - name: Compile and test actual portable window geometry
+        run: |
+          if python tools/check_window_grid_helpers.py "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/window-tests.log" 2>&1; then
+            grep -E '^Portable window geometry:|^running [0-9]+ tests|^test result:' "$RUNNER_TEMP/window-tests.log"
+          else
+            grep -E '^error\[E[0-9]+\]|^test result:|^Portable window geometry validation failed' "$RUNNER_TEMP/window-tests.log" || true
+            exit 1
+          fi

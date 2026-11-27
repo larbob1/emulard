@@ -53,11 +53,11 @@ NEW = """    // Deterministic examples, not title traces or resident-memory esti
         let ask = base + WINDOW / 2 + 4096;
         let sized = window_of(ask, ask + 4096, grid(Some(2048)));
         // Existing loose() explicitly passes WINDOW for a lengthless ask.
-        let unsized = window_of(ask, ask + 1, WINDOW);
+        let unsized_key = window_of(ask, ask + 1, WINDOW);
         assert_eq!(sized, (base + WINDOW / 2, WINDOW / 2));
-        assert_eq!(unsized, (base, WINDOW));
-        assert_ne!(sized, unsized);
-        assert_eq!(cover([unsized, sized].into_iter()), WINDOW);
+        assert_eq!(unsized_key, (base, WINDOW));
+        assert_ne!(sized, unsized_key);
+        assert_eq!(cover([unsized_key, sized].into_iter()), WINDOW);
     }
 
     /// A window holds its ask and is cut on the grid; on the default grid
