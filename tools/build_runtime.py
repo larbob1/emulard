@@ -144,6 +144,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_pipeline_perf.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_disk_worker_perf.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_paired_tile_replay.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_checked_unmap.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
