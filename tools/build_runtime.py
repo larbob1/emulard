@@ -39,7 +39,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
         command.extend(["--features", "diagnostics"])
     command.append(suite)
     if ignored:
-        if package != "victory-hle" or suite != "hle_pool_native_review::reentrant_pool_callback_progress" or expected != 1:
+        if package != "victory-hle" or suite not in ("hle_pool_native_review::reentrant_pool_callback_progress", "hle_idle_native_review::idle_native_baseline", "hle_idle_native_review::idle_native_candidate", "hle_idle_boundary_review::empty_wake_then_submission_reuses_idle_worker", "hle_idle_boundary_review::expiry_holds_lock_then_submission_starts_replacement", "hle_idle_cleanup_native_review::retired_worker_cleanup_does_not_supply_capacity") or expected != 1:
             raise ValueError("ignored HLE fixture requires exact count-one gate")
         command.extend(["--", "--ignored", "--test-threads=1"])
     print(f"Running runtime test: {package} {suite}", flush=True)
@@ -48,8 +48,13 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
-    result = subprocess.run(command, cwd=target, env=env, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace")
+    try:
+        result = subprocess.run(command, cwd=target, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, errors="replace",
+                                **({"timeout": 600} if ignored else {}))
+    except subprocess.TimeoutExpired:
+        print(f"Runtime test watchdog expired: {package} {suite}", flush=True)
+        raise subprocess.CalledProcessError(1, command)
     # Keep the compiler output available to local callers. CI filters this
     # output and never republishes source or title data.
     if hasattr(sys.stdout, "reconfigure"):
@@ -65,6 +70,10 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False, expected=
     if expected is not None and (len(counts) != 1 or passed != expected):
         print(f"Runtime test count mismatch: {package} {suite} expected={expected} passed={passed}", flush=True)
         raise subprocess.CalledProcessError(1, command)
+    if ignored:
+        ignored_counts = re.findall(r"test result: (?:ok|FAILED)\. \d+ passed; \d+ failed; (\d+) ignored;", result.stdout)
+        if ignored_counts != ["0"]:
+            raise subprocess.CalledProcessError(1, command)
     print(f"Runtime test counts: {package} {suite} passed={passed} failed={failed}", flush=True)
 
 def validate_paired(target, *, keep_going=False):
@@ -96,6 +105,11 @@ def validate_paired(target, *, keep_going=False):
     suite("victory-hle", "xasync::tests::", expected=7)
     suite("victory-hle", "pool_callbacks_may_wait_for_each_other", expected=1)
     suite("victory-hle", "hle_pool_native_review::reentrant_pool_callback_progress", expected=1, ignored=True)
+    suite("victory-hle", "hle_idle_native_review::idle_native_baseline", expected=1, ignored=True)
+    suite("victory-hle", "hle_idle_native_review::idle_native_candidate", expected=1, ignored=True)
+    suite("victory-hle", "hle_idle_boundary_review::empty_wake_then_submission_reuses_idle_worker", expected=1, ignored=True)
+    suite("victory-hle", "hle_idle_boundary_review::expiry_holds_lock_then_submission_starts_replacement", expected=1, ignored=True)
+    suite("victory-hle", "hle_idle_cleanup_native_review::retired_worker_cleanup_does_not_supply_capacity", expected=1, ignored=True)
     suite("victory-gpu", "mapping_tests")
     suite("victory-gpu", "perf_hotpath_coverage_tests")
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
