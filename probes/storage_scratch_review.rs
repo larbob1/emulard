@@ -320,3 +320,130 @@ fn allocator_calls_fixed_size_bounce_review() {
         original_calls.requested, reused_calls.acquisitions(), reused_calls.dealloc,
         reused_calls.requested, retained, trim_calls.dealloc);
 }
+
+
+#[derive(Clone, Copy, Default)]
+struct MixedTotals {
+    calls: AllocCalls,
+    hits: usize,
+    reads: usize,
+    failed: usize,
+    trimmed: usize,
+    peak_idle: usize,
+}
+
+impl MixedTotals {
+    fn add(&mut self, c: AllocCalls) {
+        self.calls.alloc += c.alloc;
+        self.calls.zeroed += c.zeroed;
+        self.calls.realloc += c.realloc;
+        self.calls.dealloc += c.dealloc;
+        self.calls.requested += c.requested;
+    }
+}
+
+#[test]
+fn allocator_calls_mixed_size_and_trim_review() {
+    const LIMIT: usize = 65536;
+    const MAX: usize = 131072;
+    // (bytes, fail, trim before read). The trim is a controlled fixture
+    // event, not a simulated OS memory-pressure signal.
+    const PATTERN: [(usize, bool, bool); 16] = [
+        (4096, false, false), (4096, false, false),
+        (8192, false, false), (32, false, false),
+        (0, false, false), (65536, false, false),
+        (8192, false, false), (131072, false, false),
+        (4096, false, false), (4096, true, false),
+        (4096, false, false), (4096, false, false),
+        (32768, false, true), (32768, false, false),
+        (64, true, false), (4096, false, false),
+    ];
+    let mut input = vec![0u8; MAX];
+    let mut a = vec![0xA5; MAX + 8];
+    let mut b = a.clone();
+    for (label, cap) in [("disabled", 0usize), ("bounded", LIMIT)] {
+        let mut slot = Scratch::new(cap);
+        let mut original = MixedTotals::default();
+        let mut reuse = MixedTotals::default();
+        let mut nonzero = 0;
+        let mut total_bytes = 0;
+        for round in 0..8 {
+            for (index, &(size, fail, trim)) in PATTERN.iter().enumerate() {
+                if trim {
+                    let (_, calls) = count_calls(|| slot.trim());
+                    reuse.add(calls);
+                    reuse.trimmed += 1;
+                    assert_eq!(slot.retained(), 0);
+                }
+                nonzero += usize::from(size != 0);
+                total_bytes += size;
+                input[..size].fill((round * PATTERN.len() + index) as u8);
+                a.fill(0xA5);
+                b.fill(0xA5);
+                let (expected, old) = count_calls(|| {
+                    let mut data = vec![0u8; std::hint::black_box(size)];
+                    if fail {
+                        data[..size / 2].copy_from_slice(&input[..size / 2]);
+                        std::hint::black_box(&data);
+                        Err(())
+                    } else {
+                        data.copy_from_slice(&input[..size]);
+                        a[..size].copy_from_slice(std::hint::black_box(&data));
+                        Ok(())
+                    }
+                });
+                let ((actual, acquisition), new) = count_calls(|| {
+                    bounce(&mut slot, &mut b, &input[..size], fail)
+                });
+                assert_eq!(actual, expected);
+                assert_eq!(a, b);
+                assert!(b[size..].iter().all(|&x| x == 0xA5));
+                if fail {
+                    assert!(b.iter().all(|&x| x == 0xA5));
+                }
+                original.add(old);
+                reuse.add(new);
+                original.reads += 1;
+                reuse.reads += 1;
+                original.failed += usize::from(fail);
+                reuse.failed += usize::from(fail);
+                reuse.hits += usize::from(acquisition == Acquisition::ReusedCapacity);
+                reuse.peak_idle = reuse.peak_idle.max(slot.retained());
+                assert!(slot.retained() <= cap);
+                if fail || size > cap || cap == 0 {
+                    assert_eq!(slot.retained(), 0);
+                }
+                if acquisition == Acquisition::ReusedCapacity {
+                    assert_eq!(new.acquisitions(), 0);
+                }
+            }
+        }
+        let before_trim = slot.retained();
+        let (_, final_trim) = count_calls(|| slot.trim());
+        reuse.add(final_trim);
+        reuse.trimmed += 1;
+        assert_eq!(slot.retained(), 0);
+        assert_eq!(final_trim.dealloc, usize::from(before_trim != 0));
+        assert_eq!(original.calls.acquisitions(), nonzero);
+        assert_eq!(original.calls.dealloc, nonzero);
+        assert_eq!(original.calls.requested, total_bytes);
+        // Reallocation does not create a second live allocation. Every
+        // successful new allocation must have been freed after the trim.
+        assert_eq!(reuse.calls.alloc + reuse.calls.zeroed, reuse.calls.dealloc);
+        assert_eq!(reuse.reads, original.reads);
+        assert_eq!(reuse.failed, original.failed);
+        if cap == 0 {
+            assert_eq!(reuse.hits, 0);
+            assert_eq!(reuse.calls.acquisitions(), nonzero);
+            assert_eq!(reuse.peak_idle, 0);
+        } else {
+            assert!(reuse.hits > 0);
+            assert!(reuse.calls.acquisitions() < original.calls.acquisitions());
+        }
+        println!("Storage scratch mixed calls: mode={} cap={} requests={} failed={} nonzero={} input_bytes={} baseline_acquisitions={} baseline_requested={} reuse_acquisitions={} reuse_realloc={} reuse_requested={} reuse_dealloc={} hits={} trim_events={} peak_idle={} final_idle={}",
+            label, cap, reuse.reads, reuse.failed, nonzero, total_bytes,
+            original.calls.acquisitions(), original.calls.requested,
+            reuse.calls.acquisitions(), reuse.calls.realloc, reuse.calls.requested,
+            reuse.calls.dealloc, reuse.hits, reuse.trimmed, reuse.peak_idle, slot.retained());
+    }
+}
