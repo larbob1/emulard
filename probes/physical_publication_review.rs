@@ -6,13 +6,16 @@ const PAGE: u64 = 65536;
 #[derive(Debug, PartialEq, Eq)]
 struct Snapshot { generation: u64, view_bytes: u64, unique_pages: u64, alias_bytes: u64 }
 #[derive(Debug, PartialEq, Eq)]
-enum Unavailable { Initial, WritingOrExhausted, Changed, Invalid }
+enum Unavailable { Initial, Writing, Exhausted, Changed, Invalid }
 #[derive(Default)]
 struct Publication {
     sequence: AtomicU64,
     view_bytes: AtomicU64,
     unique_pages: AtomicU64,
     valid: AtomicBool,
+    // Category-local loss of source knowledge cannot be cleared by later
+    // plausible totals. This prototype has no reconstruction/reset path.
+    uncertain: AtomicBool,
 }
 fn alias(view_bytes: u64, unique_pages: u64) -> Option<u64> {
     if view_bytes % PAGE != 0 { return None; }
@@ -30,9 +33,12 @@ impl Publication {
             return false;
         };
         self.sequence.store(old + 1, SeqCst);
+        if !source_valid || alias(view_bytes, unique_pages).is_none() {
+            self.uncertain.store(true, SeqCst);
+        }
         self.view_bytes.store(view_bytes, SeqCst);
         self.unique_pages.store(unique_pages, SeqCst);
-        self.valid.store(source_valid && alias(view_bytes, unique_pages).is_some(), SeqCst);
+        self.valid.store(!self.uncertain.load(SeqCst), SeqCst);
         self.sequence.store(next, SeqCst);
         true
     }
@@ -43,7 +49,8 @@ impl Publication {
     fn sample_with(&self, between: impl FnOnce()) -> Result<Snapshot, Unavailable> {
         let first = self.sequence.load(SeqCst);
         if first == 0 { return Err(Unavailable::Initial); }
-        if first % 2 != 0 { return Err(Unavailable::WritingOrExhausted); }
+        if first == u64::MAX { return Err(Unavailable::Exhausted); }
+        if first % 2 != 0 { return Err(Unavailable::Writing); }
         let view_bytes = self.view_bytes.load(SeqCst);
         between();
         let unique_pages = self.unique_pages.load(SeqCst);
@@ -79,7 +86,7 @@ mod tests {
     fn odd_generation_is_not_read_or_retried() {
         let p = Publication::default();
         p.sequence.store(1,SeqCst);
-        assert_eq!(p.sample_with(|| panic!("odd read should return")),Err(Unavailable::WritingOrExhausted));
+        assert_eq!(p.sample_with(|| panic!("odd read should return")),Err(Unavailable::Writing));
     }
     #[test]
     fn interleaved_publication_discards_mixed_fields() {
@@ -103,7 +110,7 @@ mod tests {
         assert!(!p.publish_serialized(PAGE,1,true));
         assert_eq!(p.sequence.load(SeqCst),u64::MAX);
         assert!(!p.publish_serialized(0,0,true));
-        assert_eq!(p.sample(),Err(Unavailable::WritingOrExhausted));
+        assert_eq!(p.sample(),Err(Unavailable::Exhausted));
     }
     #[test]
     fn invalid_source_or_impossible_extents_suppress_alias() {
@@ -122,4 +129,94 @@ mod tests {
         assert_eq!(other.sample(),Err(Unavailable::Invalid));
         assert_eq!(mapping.sample().unwrap().alias_bytes,PAGE);
     }
+    #[test]
+    fn unknown_source_stays_invalid_after_plausible_publications() {
+        let p = Publication::default();
+        assert!(p.publish_serialized(2*PAGE,1,true));
+        assert!(p.publish_serialized(2*PAGE,1,false));
+        assert_eq!(p.sample(),Err(Unavailable::Invalid));
+        assert!(p.publish_serialized(PAGE,1,true));
+        assert_eq!(p.sample(),Err(Unavailable::Invalid));
+        assert!(p.publish_serialized(0,0,true));
+        assert_eq!(p.sample(),Err(Unavailable::Invalid));
+        let q = Publication::default();
+        assert!(q.publish_serialized(PAGE-1,0,true));
+        assert!(q.publish_serialized(PAGE,1,true));
+        assert_eq!(q.sample(),Err(Unavailable::Invalid));
+    }
+    #[test]
+    fn real_writer_completes_between_reader_field_loads() {
+        use std::sync::mpsc::sync_channel;
+        use std::time::Duration;
+        let p = Publication::default();
+        assert!(p.publish_serialized(4*PAGE,2,true));
+        let (entered_tx,entered_rx) = sync_channel(1);
+        let (done_tx,done_rx) = sync_channel(1);
+        std::thread::scope(|scope| {
+            let p = &p;
+            scope.spawn(move || {
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(p.publish_serialized(2*PAGE,1,true));
+                done_tx.send(()).unwrap();
+            });
+            assert_eq!(p.sample_with(|| {
+                entered_tx.send(()).unwrap();
+                done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }),Err(Unavailable::Changed));
+        });
+        assert_eq!(p.sample().unwrap().alias_bytes,PAGE);
+    }
+    #[test]
+    fn interrupted_writer_leaves_record_unavailable() {
+        let p = Publication::default();
+        assert!(p.publish_serialized(PAGE,1,true));
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(|| {
+                // Simulate an interruption between actual field stores.
+                p.sequence.store(3,SeqCst);
+                p.view_bytes.store(8*PAGE,SeqCst);
+                panic!("synthetic publication interruption");
+            });
+            assert!(writer.join().is_err());
+        });
+        assert_eq!(p.sample(),Err(Unavailable::Writing));
+        assert!(!p.publish_serialized(0,0,true));
+        assert_eq!(p.sample(),Err(Unavailable::Writing));
+    }
+    #[test]
+    fn bounded_concurrent_churn_never_accepts_inconsistent_pair() {
+        use std::sync::Barrier;
+        const N: u64 = 10_000;
+        let p = Publication::default();
+        let start = Barrier::new(2);
+        let mut accepted = 0;
+        let mut unavailable = 0;
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                start.wait();
+                for n in 1..=N {
+                    assert!(p.publish_serialized(n*2*PAGE,n,true));
+                }
+            });
+            start.wait();
+            for _ in 0..N {
+                match p.sample() {
+                    Ok(s) => {
+                        assert_eq!(s.view_bytes,2*s.unique_pages*PAGE);
+                        assert_eq!(s.alias_bytes,s.unique_pages*PAGE);
+                        assert_eq!(s.generation,2*s.unique_pages);
+                        accepted += 1;
+                    },
+                    Err(Unavailable::Initial | Unavailable::Writing | Unavailable::Changed) => unavailable += 1,
+                    Err(other) => panic!("unexpected result {other:?}"),
+                }
+            }
+        });
+        assert_eq!(accepted+unavailable,N);
+        assert_eq!(p.sample().unwrap().generation,2*N);
+        // Scheduling is nondeterministic; neither population is required to
+        // be nonzero. Forced overlap is tested separately above.
+        println!("publication churn attempts={N} accepted={accepted} unavailable={unavailable}");
+    }
+
 }
