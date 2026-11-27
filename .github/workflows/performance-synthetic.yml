@@ -25,11 +25,15 @@ jobs:
         run: |
           rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-tests
           /tmp/emulard-range-gate-tests
+      - name: Standalone exact placeholder hint tests
+        run: |
+          rustc --edition 2024 --test probes/placeholder_hint_tests.rs -o /tmp/emulard-placeholder-tests
+          /tmp/emulard-placeholder-tests
 
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-window-grid-validation' || github.head_ref == 'dev/performance-phase6-window-grid-validation'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -51,5 +55,13 @@ jobs:
             grep -E '^Portable copy helper tests:|^running [0-9]+ tests|^test result:' "$RUNNER_TEMP/copy-tests.log"
           else
             grep -E '^error\[E[0-9]+\]|^test result:|^Portable copy helper validation failed' "$RUNNER_TEMP/copy-tests.log" || true
+            exit 1
+          fi
+      - name: Compile and test actual portable window geometry
+        run: |
+          if python tools/check_window_grid_helpers.py "$RUNNER_TEMP/runtime" > "$RUNNER_TEMP/window-tests.log" 2>&1; then
+            grep -E '^Portable window geometry:|^running [0-9]+ tests|^test result:' "$RUNNER_TEMP/window-tests.log"
+          else
+            grep -E '^error\[E[0-9]+\]|^test result:|^Portable window geometry validation failed' "$RUNNER_TEMP/window-tests.log" || true
             exit 1
           fi
