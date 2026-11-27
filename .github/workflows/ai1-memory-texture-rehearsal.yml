@@ -1,0 +1,55 @@
+name: AI1 isolated memory texture rehearsal
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_memory_texture_rehearsal.py'
+      - '.github/workflows/ai1-memory-texture-rehearsal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  memory-texture-rehearsal:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-memory-texture-rehearsal'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 4248ed701ff0f4ad984b9d694642461e43a5f7e1
+          path: ai1-pr87
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 573b2d5be276e80572f9548fc6dc187ea0b63dc2
+          path: ai1-pr90
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 1b118a210d02d19686a9389fc30ea723c670bec4
+          path: ai0-pr64
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5af0fa2cbadf311947f0101eefad18b16bcc2f9a
+          path: ai0-pr65
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_memory_texture_rehearsal.py
+      - name: Exercise combined memory and texture runtime
+        run: python tools/validate_ai1_memory_texture_rehearsal.py --pr87 ai1-pr87 --pr90 ai1-pr90 --pr64 ai0-pr64 --pr65 ai0-pr65
