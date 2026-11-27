@@ -34,3 +34,6 @@ P05/P08 PR #19 b8af047; source change isolated, native validation pending. Recon
 
 ## AI 1 handoff — P12
 PR #20 ed67056: six standalone generation tests and synthetic suite pass. Mirror #10 at 3803f32 native passed 31 suites + both profiles; direct read fixture still running. P12 has no runtime consumers. Next: audit mutation footprints and synchronization, await native checks and owner gameplay evidence. No branch merges or other agent edits.
+
+## AI 1 handoff — storage lookup
+PR #21 39a481d, opt-in lookup optimization, native pending; synthetic pending. AI2 narrow staging work approved; AI3 CPU trace plan requested. Preserve frozen #18 and source branches. Measure actual workloads before integration. All IDs open.
