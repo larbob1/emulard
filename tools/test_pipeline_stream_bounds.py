@@ -9,14 +9,14 @@ import unittest
 
 PATCH = Path(__file__).resolve().parents[1] / "patches" / "paired-wave-dropped-scene-draws.patch"
 
-def postimages():
+def postimages(filename="/pipeline.rs"):
     hunks = []
     current = False
     for line in PATCH.read_text(encoding="utf-8").splitlines():
         if line.startswith("--- "):
             current = False
         elif line.startswith("+++ "):
-            current = line.endswith("/pipeline.rs")
+            current = line.endswith(filename)
         elif current and line.startswith("@@ "):
             match = re.match(r"@@ -(\d+),(\d+) \+(\d+),(\d+) @@", line)
             if not match:
@@ -63,7 +63,7 @@ mod host {
     #[derive(Default)]
     pub struct GraphicsState;
     impl GraphicsState {
-        pub unsafe fn read(&mut self, _: u32, _: *const u8) {}
+        pub unsafe fn read(&mut self, _: u32, _: *const u8) -> bool { true }
     }
 }
 fn hand_out(shaders: Vec<Shader>,
@@ -89,6 +89,51 @@ class PipelineStreamBoundsTests(unittest.TestCase):
         self.assertLess(parser.index("if size > remaining"), parser.index("cast::<Bytecode>()"))
         self.assertLess(parser.index("if size > remaining"), parser.index("graphics.read("))
 
+    def test_nested_layout_guard_wiring(self):
+        host, = [x for x in postimages("/pipeline/host.rs") if "fn input_layout_extent_valid" in x]
+        parser, = [x for x in postimages() if "fn create_stream(" in x]
+        self.assertLess(host.index("if !input_layout_extent_valid"), host.index("std::slice::from_raw_parts"))
+        self.assertLess(host.index("SemanticName.0.is_null()"), host.index("CStr::from_ptr"))
+        self.assertIn("if !unsafe {\n            graphics.read", parser)
+        self.assertIn("return E_INVALIDARG;", parser.split("graphics.read", 1)[1])
+
+    @unittest.skipUnless(shutil.which("rustc"), "rustc required for input layout extent tests")
+    def test_actual_nested_layout_arithmetic(self):
+        host, = [x for x in postimages("/pipeline/host.rs") if "fn input_layout_extent_valid" in x]
+        helper = host[host.index("fn input_layout_extent_valid"):host.index("impl GraphicsState")]
+        cases = r'''
+#[test]
+fn empty_preserves_absence() {
+    assert!(input_layout_extent_valid::<u64>(std::ptr::null(), 0));
+    assert!(input_layout_extent_valid(1usize as *const u64, 0));
+}
+#[test]
+fn null_and_misalignment_rejected() {
+    assert!(!input_layout_extent_valid::<u64>(std::ptr::null(), 1));
+    assert!(!input_layout_extent_valid(1usize as *const u64, 1));
+}
+#[test]
+fn overflow_rejected() {
+    assert!(!input_layout_extent_valid(8usize as *const u64, usize::MAX));
+    assert!(!input_layout_extent_valid(8usize as *const u64, isize::MAX as usize / 8 + 1));
+    assert!(!input_layout_extent_valid((usize::MAX & !7) as *const u64, 1));
+}
+#[test]
+fn real_array_accepted() {
+    let values = [0u64; 3];
+    assert!(input_layout_extent_valid(values.as_ptr(), values.len()));
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "input_layout.rs"
+            binary = root / "input-layout-tests.exe"
+            source.write_text(helper + cases, encoding="utf-8")
+            subprocess.run(["rustc", "--edition=2021", "--test", str(source), "-o", str(binary)],
+                           check=True, capture_output=True, text=True)
+            result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+            self.assertIn("4 passed; 0 failed", result.stdout)
+
     @unittest.skipUnless(shutil.which("rustc"), "rustc required for portable stream tests")
     def test_compiled_parser_regressions(self):
         images = postimages()
@@ -99,6 +144,9 @@ class PipelineStreamBoundsTests(unittest.TestCase):
         validator = plain.split("/// The stage's container", 1)[0]
         creators = plain[plain.index("/// Device method.\npub(crate) extern \"system\" fn create_graphics("):]
         fixture = fixture.split("    /// The stream layout", 1)[0]
+        # The real D3D12 nested fixture belongs to native Windows only.
+        fixture = fixture[fixture.index("    #[test]\n    fn pipeline_stream_rejects_invalid_shader_extent"):]
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "stream.rs"
