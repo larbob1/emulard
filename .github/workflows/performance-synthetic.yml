@@ -37,7 +37,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-software-pages' || github.head_ref == 'dev/performance-phase6-software-pages'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-pinned-alias-proof' || github.head_ref == 'dev/performance-phase6-pinned-alias-proof'
     steps:
       - uses: actions/checkout@v4
         with:

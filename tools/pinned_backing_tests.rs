@@ -67,6 +67,15 @@ fn pinned_backing_reads_survive_alias_replacement_and_retirement() {
     assert_eq!(plan[0].offset, 3 * PAGE - 3);
     assert_eq!(plan[1].offset, 0);
     let weak = Arc::downgrade(&plan[0].section);
+    {
+        let physical = physical();
+        let mirror = &physical.pinned_mirror;
+        let mut expected = vec![(pool as usize + 3 * PAGE - 3, 3), (address, 3)];
+        expected.sort_unstable();
+        assert_eq!(mirror.aliases_for(&plan[0].section, 3 * PAGE - 3, 3, 65536, 2), Some(expected));
+        assert!(mirror.aliases_for(&plan[0].section, 3 * PAGE - 3, 3, 65536, 1).is_none());
+        assert!(mirror.matches_plan(address, 8, &plan));
+    }
     let mut bytes = [0; 8];
     assert!(read_plan(&plan, &mut bytes));
     assert_eq!(bytes, [3,3,3,1,1,1,1,1]);
@@ -78,6 +87,14 @@ fn pinned_backing_reads_survive_alias_replacement_and_retirement() {
         assert!(!physical.mirror_failed);
         physical.pinned_mirror.resolve(address, 8).unwrap()
     };
+    {
+        let physical = physical();
+        let mirror = &physical.pinned_mirror;
+        assert!(!mirror.matches_plan(address, 8, &plan));
+        assert!(mirror.matches_plan(address, 8, &newer));
+        assert_eq!(mirror.aliases_for(&plan[0].section, 3 * PAGE - 3, 3, 65536, 2),
+                   Some(vec![(pool as usize + 3 * PAGE - 3, 3)]));
+    }
     assert!(read_plan(&newer, &mut bytes));
     assert_eq!(bytes, [2,2,2,1,1,1,1,1]);
     assert!(read_plan(&plan, &mut bytes));
@@ -90,6 +107,9 @@ fn pinned_backing_reads_survive_alias_replacement_and_retirement() {
         let physical = physical();
         assert!(!physical.mirror_failed);
         assert!(physical.pinned_mirror.resolve(address, 8).is_none());
+        assert!(!physical.pinned_mirror.matches_plan(address, 8, &plan));
+        assert_eq!(physical.pinned_mirror.aliases_for(&plan[0].section, 0, 3 * PAGE, 65536, 0),
+                   Some(vec![]));
     }
     assert!(weak.upgrade().is_some());
     assert!(read_plan(&plan, &mut bytes));
