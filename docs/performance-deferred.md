@@ -24,11 +24,13 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P14 | 4 | Candidate | Optional exact AVX2 scan and sparse merge are implemented; benchmark and validate. Actual GPU readback bandwidth, redundant hashing and synchronization reductions remain open; maintain exact visibility and fences. |
 | P15 | 4 | Candidate | Optional hard idle snapshot budget implemented; validate memory pressure and allocation churn. Persistent resources, staging reuse, async transfers, detiling and VRAM/RAM budget validation remain open. |
 | P16 | 5 | Open | Unsupported shader operations, paired-wave semantics, waterfall loops, FidelityFX descriptor mutation, missing pipeline methods; ensure scene rendering correctness. |
-| P17 | 5 | Open | Persistent pipeline/shader cache correctness and performance, compile worker stability, native-wave specialization, dropped draws. |
+| P17 | 5 | Candidate | Process-local cache save serialization and retry bookkeeping, optional bounded requested-graphics bursts and compiler worker count implemented. Persistent shader cache key coverage, cross-process cache ownership, compile worker stability, native-wave specialization and dropped draws remain open; validate. |
 | P18 | 6 | Open | Descriptor and command list caching, storage worker tuning, release/PGO evaluation, native Linux backend feasibility. |
 | P19 | 6 | Open | Consolidate validated improvements across runtime variants, improve CI and run end-to-end correctness/performance acceptance; close only with evidence. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
 | P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. |
+
+| P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
 
 ## Current state
 
@@ -38,4 +40,6 @@ Phase 3: short-lock snapshot candidate and standalone range-gate prototype.
 The global mapping lock remains the production safety mechanism.
 Phase 4: opt-in GPU copy-back scan/merge and idle snapshot budget candidates;
 production shader dirty bitmap and asynchronous readbacks remain deferred.
-Phases 5–6 are not implemented. Keep this register updated in each phase.
+Phase 5: pipeline scheduling candidates and process-local cache publication
+fixes; unsupported shader lowering and actual rendering validation remain open.
+Phase 6 is not implemented. Keep this register updated in Phase 6.
