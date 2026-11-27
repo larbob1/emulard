@@ -192,7 +192,10 @@ def append(path, suffix):
 def prepare(target, proposal):
     if git(proposal, "rev-parse", "HEAD").decode().strip() != PROPOSAL:
         raise ValueError("proposal checkout mismatch")
-    values = exact_blocks((proposal / "tools/preview_ai0_ready_copy_prefix.py").read_bytes())
+    # Read canonical Git bytes, not a Windows checkout with CRLF conversion.
+    script = git(proposal, "show", "HEAD:tools/preview_ai0_ready_copy_prefix.py")
+    values = exact_blocks(script)
+    print(f"proposal={PROPOSAL} preview_blob={blob(script)}", flush=True)
     subprocess.run([sys.executable, str(ROOT / "tools/build_runtime.py"), str(target),
                     "--paired-wave-refresh"], check=True)
     if git(target, "rev-parse", "HEAD").decode().strip() != UPSTREAM:
