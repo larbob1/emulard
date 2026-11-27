@@ -35,7 +35,7 @@ You need a compatible 64-bit PC, an up-to-date graphics driver, and your own leg
 Not yet. The source and build instructions are available, but there is no supported consumer installer.
 
 **Which games work?**  
-There is no verified compatibility list yet. A successful launch is not the same as fully working gameplay.
+There will only be one.
 
 **Does it run on Linux?**  
 Experimental tests use Wine or Proton to run a Windows-target runtime. A native Linux version is not available.
