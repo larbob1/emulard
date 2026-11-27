@@ -40,7 +40,7 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
     command.append(suite)
     print(f"Running runtime test: {package} {suite}", flush=True)
     switches = ("VICTORY_MAP_SKIP_SAME", "VICTORY_MAP_DIFF", "VICTORY_MAP_RUNS",
-                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS")
+                "VICTORY_BACK_AVX2", "VICTORY_BACK_SPARSE_MERGE", "VICTORY_MAP_DIFF_RUNS", "VICTORY_TEXTURE_VIEW_ESTIMATE", "VICTORY_MAP_ALIAS_DIRECT", "VICTORY_MAP_EXACT_PLACEHOLDERS", "VICTORY_MAP_SCATTER_LOCK_BATCH")
     if env is not None:
         values = " ".join(f"{key}={env[key]}" for key in switches if env.get(key) in ("0", "1"))
         print("Runtime test switches: " + values, flush=True)
@@ -84,6 +84,11 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
     suite("victory-hle", "placeholder_hint_tests")
+    for diff in ("0", "1"):
+        for batch in ("0", "1"):
+            env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF=diff, VICTORY_MAP_RUNS="0", VICTORY_MAP_SCATTER_LOCK_BATCH=batch)
+            suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+            suite("victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="0", VICTORY_MAP_RUNS="0", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
     suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="1", VICTORY_MAP_DIFF_RUNS="1", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
@@ -165,6 +170,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_exact_placeholders.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_scatter_lock_batch.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
