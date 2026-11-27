@@ -52,3 +52,28 @@ indistinguishable; the identity check is best effort, not a kernel pidfd.
 Synthetic tests cover parser and sampling arithmetic; a Linux-only smoke test samples
 its own Python process through real /proc. Actual Proton measurements
 are still required. Do not upload raw logs, proprietary content or profiles.
+
+## P01/P18 memory-pressure follow-up
+
+The first exact #18 smoke was stopped by the separate local RAM guard. The
+sampler now reads cheap allowlisted /proc/PID/status and /proc/meminfo fields
+within the existing process identity bracket, not smaps or page-table scans.
+Per interval end and per-field first/last/min/max observed values and coverage
+are reported. Missing/duplicated/malformed values remain null, not zero.
+The first observed endpoint is after the first sleep; initial stat is used for
+CPU deltas, not included in memory extrema. Status RSS and stat RSS are
+non-atomic and approximate; RSS anonymous/file/shared-memory categories can
+include shared physical pages. VmSize is virtual space, VmHWM is kernel
+lifetime high-water, VmSwap only reported process anonymous swap. System
+MemAvailable is the kernel estimate; SwapTotal/SwapFree are host-wide, not
+process usage. No automatic summation, leak or memory-owner attribution,
+GPU VRAM or per-allocation accounting. Optional fields may be unavailable.
+
+Use existing local data first. If coordinator/owner approves a further protected
+smoke, collect one-second intervals with the same external memory guard and
+record scene boundaries locally. Never remove/lower the guard to force a run,
+change swap, memory budgets or caches without approval, or launch extra copies.
+Compare the trajectory of anonymous, file and shmem resident classes, virtual
+size, process swap and available RAM with existing runtime allocation/texture/
+pipeline/backing counters. Different sampled maxima need not co-occur. This
+is observational triage, not a memory fix or acceptance benchmark.

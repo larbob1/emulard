@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from host_profile import parse_stat, parse_io, read_snapshot, interval, sample, summarize
+from host_profile import (parse_stat, parse_io, read_snapshot, interval, sample, summarize,
+                          parse_memory, PROCESS_MEMORY, SYSTEM_MEMORY)
 
 
 def stat(birth=20, user=100, system=50, rss=10):
@@ -39,6 +40,22 @@ class HostProfileTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 parse_io(text)
 
+    def test_memory_numeric_allowlist_and_missing_fields(self):
+        fields = parse_memory("Name: private-process\nVmRSS: 40 kB\nRssAnon: 30 kB\n"
+                              "RssFile: 7 kB\nRssShmem: 3 kB\nVmSwap: 0 kB\n"
+                              "VmSize: 1000 kB\nVmHWM: 55 kB\n", PROCESS_MEMORY)
+        self.assertEqual(fields["process_anon_rss_bytes"], 30720)
+        self.assertEqual(fields["process_anon_swap_bytes"], 0)
+        self.assertEqual(fields["process_status_rss_highwater_bytes"], 56320)
+        self.assertNotIn("private-process", str(fields))
+        fields = parse_memory("MemAvailable: 1 kB\nMemAvailable: 2 kB\n"
+                              "SwapTotal: -1 kB\nSwapFree: 12 MB\n"
+                              "MemTotal: 99999999999999999999 kB", SYSTEM_MEMORY)
+        self.assertTrue(all(v is None for v in fields.values()))
+        fields = parse_memory("MemAvailable: 0 kB\n", SYSTEM_MEMORY)
+        self.assertEqual(fields["system_available_bytes"], 0)
+        self.assertIsNone(fields["system_swap_free_bytes"])
+
     def test_snapshot_readonly_and_partial_threads(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -46,6 +63,8 @@ class HostProfileTests(unittest.TestCase):
             task = proc / "task" / "456"
             task.mkdir(parents=True)
             (proc / "stat").write_text(stat())
+            (proc / "status").write_text("Name: private-process\nRssAnon: 30 kB\nVmSwap: 0 kB\n")
+            (root / "meminfo").write_text("MemAvailable: 1024 kB\n")
             (task / "stat").write_text(stat())
             (proc / "task" / "789").mkdir()
             times = iter((100, 120, 300))
@@ -53,6 +72,9 @@ class HostProfileTests(unittest.TestCase):
             self.assertEqual(r["time_ns"], 110)
             self.assertEqual(r["read_ns"], 200)
             self.assertIsNone(r["io"])
+            self.assertEqual(r["memory"]["process_anon_rss_bytes"], 30720)
+            self.assertEqual(r["memory"]["system_available_bytes"], 1048576)
+            self.assertIsNone(r["memory"]["process_file_rss_bytes"])
             self.assertTrue(r["threads_incomplete"])
             self.assertEqual(len(r["threads"]), 1)
 
@@ -71,6 +93,24 @@ class HostProfileTests(unittest.TestCase):
         r = interval(a, b, 100, 4096)
         self.assertIsNone(r["read_bytes"])
         self.assertIsNone(r["hottest_stable_thread_core_equivalents"])
+
+    def test_memory_partial_coverage_and_distinct_endpoints(self):
+        a, b, c, d = (snap(i * 1_000_000_000, 100 + i * 10) for i in range(4))
+        a["memory"] = {"system_available_bytes": 999}  # initial, not interval end
+        b["memory"] = {"system_available_bytes": 400, "process_anon_rss_bytes": 20}
+        d["memory"] = {"system_available_bytes": 100, "process_anon_rss_bytes": 80,
+                       "process_file_rss_bytes": 0}
+        rows = [interval(x, y, 100, 4096) for x, y in ((a,b),(b,c),(c,d))]
+        self.assertIsNone(rows[1]["memory_end"]["system_available_bytes"])
+        result = summarize(rows, 3)["memory_observations"]
+        self.assertEqual(result["system_available_bytes"], {
+            "observed_endpoints": 2, "first_observed_interval": 1,
+            "last_observed_interval": 3, "first_observed_bytes": 400,
+            "last_observed_bytes": 100, "min_observed_bytes": 100,
+            "max_observed_bytes": 400})
+        self.assertEqual(result["process_file_rss_bytes"]["observed_endpoints"], 1)
+        self.assertEqual(result["process_file_rss_bytes"]["min_observed_bytes"], 0)
+        self.assertIsNone(result["process_anon_swap_bytes"]["max_observed_bytes"])
 
     def test_pid_reuse_and_counter_reset(self):
         for b in (snap(1_000_000_000, birth=21), snap(1_000_000_000, ticks=99), snap()):
@@ -93,6 +133,8 @@ class HostProfileTests(unittest.TestCase):
         self.assertGreaterEqual(result["mean_cpu_core_equivalents"], 0)
         self.assertGreaterEqual(result["intervals"][0]["stable_threads"], 1)
         self.assertNotIn("birth", json.dumps(result))
+        self.assertGreater(result["memory_observations"]["system_available_bytes"]["observed_endpoints"], 0)
+        self.assertGreater(result["memory_observations"]["process_status_rss_bytes"]["max_observed_bytes"], 0)
 
     def test_elapsed_weighted_rates(self):
         a, b, c = snap(), snap(1_000_000_000, 200), snap(4_000_000_000, 800)
