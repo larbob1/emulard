@@ -25,6 +25,10 @@ jobs:
         run: |
           rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-tests
           /tmp/emulard-range-gate-tests
+      - name: Standalone range generation tests
+        run: |
+          rustc --edition 2024 --test probes/range_generations.rs -o /tmp/emulard-range-generations
+          /tmp/emulard-range-generations
 
   portable-copy:
     runs-on: ubuntu-latest
