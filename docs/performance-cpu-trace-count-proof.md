@@ -1,0 +1,3 @@
+# Native CPU trace exact-count proof
+
+Child of #33 20c4ad8a, no runtime source change. Exact 23 buffer +7 bridge #[test] functions checked at pinned proposal. Existing native gate rejects zero tests but does not enforce expected count. This candidate requires one Cargo lib summary, exactly 30 passed and zero failures for cpu_trace, reports sanitized numeric counts on matching successful suite only; regression tests reject missing/partial/extra/multiple summaries and mismatched association. Native both profiles retained. No local trace until count gate, safe path and D17 recovered headroom. Does not prove live performance or correctness. Prior native job unaffected.

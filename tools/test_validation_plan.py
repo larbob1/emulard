@@ -14,6 +14,33 @@ class ValidationPlanTests(unittest.TestCase):
             self.assertGreater(suite.call_count, 10)
             self.assertEqual(run.call_count, 2)
 
+    def test_cpu_trace_suite_diagnostic_only(self):
+        with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
+            validate_paired(Path("."))
+        selected = [c for c in suite.call_args_list
+                    if c.args[1:3] == ("victory-gpu", "cpu_trace")]
+        self.assertEqual(len(selected), 1)
+        self.assertTrue(selected[0].kwargs["diagnostics"])
+        self.assertEqual(selected[0].kwargs["expected"], 30)
+        self.assertEqual(run.call_count, 2)
+
+    def test_exact_native_count(self):
+        from build_runtime import test_suite
+        for output, ok in (
+            ("test result: ok. 30 passed; 0 failed; 0 ignored;", True),
+            ("test result: ok. 29 passed; 0 failed; 1 ignored;", False),
+            ("test result: ok. 31 passed; 0 failed;", False),
+            ("test result: ok. 15 passed; 0 failed;\ntest result: ok. 15 passed; 0 failed;", False),
+            ("test result: FAILED. 30 passed; 1 failed;", False),
+        ):
+            with self.subTest(output=output), patch("build_runtime.subprocess.run") as run:
+                run.return_value.stdout = output
+                if ok:
+                    test_suite(Path("."), "victory-gpu", "cpu_trace", expected=30)
+                else:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        test_suite(Path("."), "victory-gpu", "cpu_trace", expected=30)
+
     def test_default_fails_fast(self):
         with patch("build_runtime.test_suite", side_effect=subprocess.CalledProcessError(1, ["test"])) as suite, patch("build_runtime.run") as run:
             with self.assertRaises(subprocess.CalledProcessError):
