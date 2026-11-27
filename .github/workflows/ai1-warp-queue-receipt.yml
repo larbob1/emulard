@@ -1,0 +1,36 @@
+name: AI1 isolated WARP queue receipt
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai1_warp_queue_receipt.rs'
+      - 'tools/validate_ai1_warp_queue_receipt.py'
+      - '.github/workflows/ai1-warp-queue-receipt.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  owned-queue-receipt:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-warp-queue-receipt'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_warp_queue_receipt.py
+      - name: Exercise bounded independent WARP transfer and fence
+        run: python tools/validate_ai1_warp_queue_receipt.py
