@@ -3,7 +3,7 @@
 Mission: sustained, correctly rendered 30 FPS. Current owner-reported Proton gameplay: 2–3 FPS, not a formal benchmark. Correctness before speed.
 
 ## Replacement chats
-Use the [four universal restart prompts](coordination/START-HERE.md) for AI 1–4. They recover current GitHub state rather than relying on a fixed initial task. Only the prompt matching your role applies; the other prompts describe their workstream boundaries. Older coordination entries are historical; follow the latest applicable decisions and owner approval.
+Use the [six universal restart prompts](coordination/START-HERE.md) for AI 1–6. They recover current GitHub state rather than relying on a fixed initial task. Only the prompt matching your role applies; the other prompts describe their workstream boundaries. Older coordination entries are historical; follow the latest applicable decisions and owner approval.
 
 ## Start every session
 1. Read all files in [coordination/](https://github.com/larbob1/emulard/tree/coordination/coordination), the [roadmap](https://github.com/larbob1/emulard/blob/main/docs/ROADMAP-30FPS.md), and [deferred register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md). Fetch current refs and check open PRs and CI. Do not trust stale chat history.
@@ -16,6 +16,8 @@ Use the [four universal restart prompts](coordination/START-HERE.md) for AI 1–
 | AI 2 Graphics | dev/performance-phase6-graphics | [#12](https://github.com/larbob1/emulard/issues/12) |
 | AI 3 Reliability | dev/performance-phase6-reliability | [#13](https://github.com/larbob1/emulard/issues/13) |
 | AI 4 Local validation | dev/performance-phase6-local-validation | [#27](https://github.com/larbob1/emulard/issues/27) |
+| AI 5 Storage / streaming | dev/performance-phase6-storage-streaming | [#45](https://github.com/larbob1/emulard/issues/45) |
+| AI 6 CPU / HLE scheduling | dev/performance-phase6-cpu-execution | [#46](https://github.com/larbob1/emulard/issues/46) |
 | Project owner | Priorities, supervised gameplay tests, merge authorization | — |
 
 Coordinator alone writes canonical coordination documents, integration branch and deferred register. Other agents post claims, progress, conflicts and handoffs in their own GitHub issue and PR. Agents cannot see each other's chats; GitHub is the shared record. Rules are procedural, not enforced by branch permissions. Owner grants access separately; never share passwords or tokens.
@@ -31,3 +33,6 @@ Open a draft PR against dev/performance-phase6. Include task ID, base/upstream S
 Keep private logs, title data, credentials, keys and proprietary assets out of GitHub. Share only reviewed numeric summaries and synthetic fixtures. No promise of background work. At session end post handoff per HANDOFF.md; preserve all unresolved P-IDs.
 
 AI 4 collects local runtime evidence only; AI 3 owns reporting/acceptance tools. AI 4 must verify enforced read-only title isolation before every launch; never modify or upload title files, bypass access controls, or change system configuration without owner approval. See ONBOARD-LOCAL.md. Local evidence claims may use issue handoff without a PR when no source changes are made.
+
+## Six-agent scope (D23)
+AI5 owns implementation-side P23 storage/streaming and scoped P18 storage-worker work, with dstorage.rs as the initial source focus. AI6 owns implementation-side P18 CPU/HLE execution, thread/wait contention and focused synthetic P03/P24 support, initially threads.rs/kernel.rs. AI3 retains measurement, reporting, acceptance and CI triage. AI1 retains integration, shared build/CI, mapping and backing ownership; AI2 retains graphics, shader/pipeline scheduling, GPU fence/descriptor/staging ownership; AI4 alone runs approved local tests. AI5/AI6 must obtain symbol-level agreement before touching shared modules, no access-control bypass, no local title access, no system or runtime policy changes outside reviewed claims. Both start with read-only audit/synthetic fixtures; D22 still restricts title launches. Existing claims, frozen #18, guards, defaults and P-ID acceptance remain unchanged.

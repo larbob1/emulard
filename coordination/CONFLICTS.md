@@ -17,3 +17,8 @@ Post conflict in your issue with P-ID, paths/symbols, competing claim, proposed 
 - P11 #32 review-only guard proposal: AI1 retains mapping lock contract; AI2 reviews actual staging upload/refresh/submission/fence ownership. No production application before agreement and native race validation. Existing short-lock flag remains off for #18 control.
 
 - P03 #33 native-only registration isolated; AI3 reporting ownership unchanged. P15/P17/P22 offline memory/pipeline triage coordinated with AI4; no production budget or staging changes without ownership/retirement proof. Dirty observation logging outside presenter guard requires review.
+
+### D23 six-agent dependencies
+- AI5 #45 storage scheduler/worker/buffer implementation vs AI1 xmem, storage write_physical, physical backing and alias lifetime: coordinate exact prepared symbols and ownership; AI2 retains GPU staging/fence/texture ownership. AI5 does not change AI3 reports or AI4 local harness.
+- AI6 #46 CPU/HLE thread/wait/timer implementation vs AI1 memory locks, AI2 graphics worker/pipeline scheduler, AI5 storage workers: read-only audit first; request agreement for shared symbols, no new system settings or scheduling policy by default. AI3 owns trace schema and analysis; AI1 owns shared build/CI. No executable/translation/access-control modifications.
+- All six agents claim before edits, post milestones, pause overlapping scope, use separate branches/checkouts and preserve frozen candidates. D22 launch restrictions continue. The project owner alone authorizes merge; AI4 alone executes approved local tests.

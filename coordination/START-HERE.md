@@ -1,6 +1,6 @@
 # Start here — replacement AI chats
 
-Use these four **universal starting prompts** when a developer chat reaches its conversation limit, is lost, or needs to be replaced. Each is a complete copy-and-paste prompt, independent of the previous conversation.
+Use these six **universal starting prompts** when a developer chat reaches its conversation limit, is lost, or needs to be replaced. Each is a complete copy-and-paste prompt, independent of the previous conversation.
 
 | AI | Role | Prompt | Workstream |
 | --- | --- | --- | --- |
@@ -8,6 +8,8 @@ Use these four **universal starting prompts** when a developer chat reaches its 
 | AI 2 | Graphics / shaders / pipelines | [ONBOARD-GRAPHICS.md](ONBOARD-GRAPHICS.md) | [#12](https://github.com/larbob1/emulard/issues/12) |
 | AI 3 | Performance / reliability | [ONBOARD-RELIABILITY.md](ONBOARD-RELIABILITY.md) | [#13](https://github.com/larbob1/emulard/issues/13) |
 | AI 4 | Local runtime testing | [ONBOARD-LOCAL.md](ONBOARD-LOCAL.md) | [#27](https://github.com/larbob1/emulard/issues/27) |
+| AI 5 | Storage / streaming / I/O | [ONBOARD-STORAGE.md](ONBOARD-STORAGE.md) | [#45](https://github.com/larbob1/emulard/issues/45) |
+| AI 6 | CPU execution / HLE scheduling | [ONBOARD-CPU.md](ONBOARD-CPU.md) | [#46](https://github.com/larbob1/emulard/issues/46) |
 
 ## Replacing a chat
 
@@ -16,4 +18,4 @@ Use these four **universal starting prompts** when a developer chat reaches its 
 3. The replacement agent must read the live repository, current decisions, issue handoffs, branch heads and CI, and resume its own latest task. It must not treat this index or the initial prompt as a frozen progress snapshot.
 4. Tell it to continue. The prompts instruct each AI to keep a persistent GitHub checkpoint after substantive milestones so that the next replacement can recover even if the old chat ended abruptly.
 
-The project owner retains priority and merge authority. Current local testing authorization is recorded in the coordination decisions and #27; never infer broader permission from this index. [AGENTS.md](../AGENTS.md) is the shared agreement. The four prompts are maintained on the coordination branch, not the novice-facing main branch.
+The project owner retains priority and merge authority. Current local testing authorization is recorded in the coordination decisions and #27; never infer broader permission from this index. [AGENTS.md](../AGENTS.md) is the shared agreement. The six prompts are maintained on the coordination branch, not the novice-facing main branch.

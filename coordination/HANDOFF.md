@@ -1,6 +1,6 @@
 # Claims and handoffs
 
-Use your workstream issue (#11 memory, #12 graphics, #13 reliability, #27 local validation) as append-only communication. Read all four issues before touching overlapping symbols. For chat replacement use [START-HERE.md](START-HERE.md). Record checkpoints after substantive milestones, not only at the end of a session, so a replacement can recover even if a conversation ends unexpectedly. Coordinator summarizes important changes here; don't independently edit this file.
+Use your workstream issue (#11 memory, #12 graphics, #13 reliability, #27 local validation, #45 storage/streaming, #46 CPU/HLE) as append-only communication. Read all six issues before touching overlapping symbols. For chat replacement use [START-HERE.md](START-HERE.md). Record checkpoints after substantive milestones, not only at the end of a session, so a replacement can recover even if a conversation ends unexpectedly. Coordinator summarizes important changes here; don't independently edit this file.
 
 ## Claim template
 - Role / P-ID / concrete task:
@@ -94,3 +94,6 @@ Native #39 exact repaired 62f827e8e3ceb55f57c11dfe041fd869da257160 run4594905438
 
 ### Coherent publication and native diagnostic follow-up
 #38 530000fc native45949434391 job140341596508 verified 4/4 and both builds,35 groups. #43 f9b1321c9993c903381582093b72dcaf91605340 claim7211312426, portable publication model, both synthetic45950412053/45950417857 success, job140344690398 12 ledger+8 publication Rust and140 Python. AI4 actual prepared boundary audit #27 7211314418, AI3/AI4 review requested. Model not runtime hooks; last complete transaction only. Next review coherent publisher actual hook boundaries and explicit partial/early returns, no new locks/scans, source validity, disabled parity and overhead; no title launch. #41 now active, #42/#44 active; newer #17 f202dc6 synthetic passed, separate eleven-count candidate if review supports it. All24 open.
+
+### D23 six-agent expansion
+Owner requested two additional agents. AI5 #45 `dev/performance-phase6-storage-streaming` handles implementation-side P23 and scoped storage P18; AI6 #46 `dev/performance-phase6-cpu-execution` handles scoped CPU/HLE execution P18 and P03/P24 fixtures. Both seeded at 6b19a42d6f0d95fe8ec42ef4a6f056a0ad96414b (current integration at setup), new roles not yet claimed by their chats. First tasks: AI5 exact prepared storage scheduler/worker and #21 audit; AI6 exact pinned thread/wait/timer path audit and focused synthetic fixture. No changes to existing active claims or branches, no new title approval, all24 IDs open, D22 unchanged. AI3 measurement/schema/acceptance, AI4 local testing, AI1 integration/CI and AI2 graphics remain intact. Universal restart prompts and shared agreement updated for six agents. Check live issues before editing.
