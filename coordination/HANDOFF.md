@@ -51,3 +51,6 @@ P05 #25 7f7db1e synthetic passed 115 Python +4 range +6 hint +10 portable copy e
 AI4 #27 assigned local evidence collection, with read-only title isolation, supervised baseline and frozen #18 candidate order; first loading-only smoke and build blocker recorded in BENCHMARKS. Native #23 42/42 groups passed, final #26 portable job passed. Next local gameplay validation and review exact AI2/AI3 proposed hooks; no new FPS result.
 
 #26 native scheduled on acfd8375, #23 completed, #25 active. D12 diagnostic staging gates provided to AI2 and AI3; exact full prepared composition and registration still need review. AI4 longer smoke underway per issue claim, not a result. No game files or main/frozen branches changed by coordinator.
+
+### Single-variable storage candidate
+#29 15778831 derives from frozen #18 and exact #21 lookup patcher/test. Native #25 verified 34/34; #29 synthetic passed 160 executions and pinned prep, native active; #26 active. AI4 initial test order unchanged, optional storage comparison after valid #18 gameplay and clearance. Next: local baseline, native #26/#29, #17 extent snapshot, prepared diagnostic review. No merge/gameplay result.
