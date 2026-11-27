@@ -94,6 +94,49 @@ fn independent_instances() {
     assert_eq!(b.get_or_hash(None, b"x", || [2; 32]), [2; 32]);
     assert_eq!(a.get_or_hash(None, b"x", || panic!("rehashed")), [1; 32]);
 }
+
+// Count calls into the actual extracted helper, not measured hash time.
+// The deliberately cheap oracle stands in for the real digest operation.
+#[test]
+fn workload_hash_invocation_counts() {
+    const N: usize = 1024;
+    let a = vec![11u8; 4096];
+    let b = vec![22u8; 4096];
+    let oversized = vec![33u8; BUILD_MEMO_MAX + 1];
+    for (label, expected) in [("stable", 1), ("grouped", 64),
+        ("alternating", N), ("oversized", N), ("exe_churn", N)] {
+        let mut memo = BuildFingerprintMemo::default();
+        let mut calls = 0;
+        for i in 0..N {
+            let (exe, bytes, oracle) = match label {
+                "stable" => (None, a.as_slice(), [11; 32]),
+                "grouped" if (i / 16) % 2 == 0 => (None, a.as_slice(), [11; 32]),
+                "grouped" => (None, b.as_slice(), [22; 32]),
+                "alternating" if i % 2 == 0 => (None, a.as_slice(), [11; 32]),
+                "alternating" => (None, b.as_slice(), [22; 32]),
+                "oversized" => (None, oversized.as_slice(), [33; 32]),
+                "exe_churn" if i % 2 == 0 => (Some([1; 32]), a.as_slice(), [44; 32]),
+                "exe_churn" => (Some([2; 32]), a.as_slice(), [55; 32]),
+                _ => unreachable!(),
+            };
+            let key = memo.get_or_hash(exe, bytes, || {
+                calls += 1;
+                oracle
+            });
+            assert_eq!(key, oracle);
+            if label == "oversized" {
+                assert!(memo.last.is_none());
+            } else {
+                let (saved_exe, saved, saved_key) = memo.last.as_ref().unwrap();
+                assert_eq!(*saved_exe, exe);
+                assert_eq!(saved.as_slice(), bytes);
+                assert_eq!(*saved_key, oracle);
+            }
+        }
+        assert_eq!(calls, expected);
+        println!("memo_hash_calls workload={label} requests={N} calls={calls}");
+    }
+}
 """
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "memo.rs"
@@ -101,6 +144,16 @@ fn independent_instances() {
             path.write_text(source + tests, encoding="utf-8")
             subprocess.run(["rustc", "--edition=2021", "--test", str(path), "-o", str(exe)],
                            check=True, capture_output=True, text=True, timeout=45)
-            result = subprocess.run([str(exe)], check=True, capture_output=True, text=True, timeout=10)
-            self.assertIn("3 passed; 0 failed", result.stdout)
-            print("Shader build memo Rust proof: 3 passed; 0 failed")
+            result = subprocess.run([str(exe), "--nocapture", "--test-threads=1"], check=True, capture_output=True, text=True, timeout=10)
+            self.assertIn("4 passed; 0 failed; 0 ignored", result.stdout)
+            receipts = [line[line.index("memo_hash_calls "):] for line in result.stdout.splitlines()
+                        if "memo_hash_calls " in line]
+            self.assertEqual(receipts, [
+                f"memo_hash_calls workload={name} requests=1024 calls={calls}"
+                for name, calls in (("stable", 1), ("grouped", 64),
+                                    ("alternating", 1024), ("oversized", 1024),
+                                    ("exe_churn", 1024))
+            ])
+            for receipt in receipts:
+                print(receipt)
+            print("Shader build memo Rust proof: 4 passed; 0 failed")
