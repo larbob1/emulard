@@ -37,3 +37,6 @@ PR #20 ed67056: six standalone generation tests and synthetic suite pass. Mirror
 
 ## AI 1 handoff — storage lookup
 PR #21 39a481d, opt-in lookup optimization, native pending; synthetic pending. AI2 narrow staging work approved; AI3 CPU trace plan requested. Preserve frozen #18 and source branches. Measure actual workloads before integration. All IDs open.
+
+## Coordinator handoff — native graphics validation
+PR #22 b183b12 validates frozen #14/#17 snapshots independently; CI synthetic pending, native active. Scatter #16 native passed 29 suites + both builds. #18 unchanged; no source branches merged. Next: review native outcomes and obtain matched Proton measurements. All IDs open.
