@@ -99,6 +99,32 @@ class FrameReportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 summarize([], target_fps=value)
 
+    def test_missing_interval_but_individual_comparison(self):
+        batch = "frame times: 2 frames in 0.1 s: shortest 40 ms, median 50, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 40 60"
+        report = summarize([batch])
+        comparison = compare(report, report)
+        self.assertEqual(comparison["approx_present_fps_ratio"], 1)
+        self.assertIsNone(comparison["median_frame_speedup"])
+        self.assertFalse(comparison["interval_comparison_usable"])
+        self.assertTrue(comparison["individual_comparison_usable"])
+
+    def test_invalid_samples_are_not_zero_or_speedup(self):
+        bad = sample().replace("250 ms/frame", "nan ms/frame")
+        report = summarize([sample(), bad, sample(0), sample(100)], skip=1)
+        self.assertEqual(report["interval_sample_quality"],
+                         {"seen": 4, "skipped": 1, "invalid_after_warmup": 2, "used": 1})
+        self.assertIsNone(compare(report, report)["median_frame_speedup"])
+        tiny = summarize([sample(0.0001)])
+        self.assertEqual(compare(tiny, tiny)["median_frame_speedup"], 1)
+
+    def test_invalid_frame_batch_suppresses_ratio(self):
+        batch = "frame times: 2 frames in 0.1 s: shortest 40 ms, median 50, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 40 60"
+        report = summarize([sample(), batch, batch.replace("2 frames", "3 frames")])
+        comparison = compare(report, report)
+        self.assertEqual(comparison["median_frame_speedup"], 1)
+        self.assertIsNone(comparison["approx_present_fps_ratio"])
+        self.assertEqual(comparison["baseline_invalid_frame_batches"], 1)
+
     def test_hotpath_counters(self):
         result = summarize(["mapping diff run totals runs=4 pages=16", "texture view estimate hits hits=8"])
         self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)

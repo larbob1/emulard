@@ -96,9 +96,11 @@ def update_counters(latest, line):
 def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     if not isfinite(target_fps) or not 0.001 <= target_fps <= 10000:
         raise ValueError("target_fps must be finite and between 0.001 and 10000")
+    if skip < 0 or skip_frame_batches < 0:
+        raise ValueError("warmup counts must be nonnegative")
     target_ms = 1000 / target_fps
     rows = []
-    seen = 0
+    seen = invalid_intervals = skipped_intervals = 0
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
     cumulative = {}
@@ -129,13 +131,16 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
             if alias:
                 aliases.append(alias)
         match = PATTERN.search(line)
-        if match:
+        if match or re.search(r"\bfps,\s.*\bms/frame\b", line):
             seen += 1
+            row = {key: float(value) for key, value in match.groupdict().items()} if match else {}
+            valid = bool(row) and row["frame"] > 0 and all(isfinite(v) for v in row.values())
             if seen <= skip:
-                continue
-            row = {key: float(value) for key, value in match.groupdict().items()}
-            if row["frame"] > 0:
+                skipped_intervals += 1
+            elif valid:
                 rows.append(row)
+            else:
+                invalid_intervals += 1
     actual = {
         "samples": len(individual_frames),
         "duration_ms_rounded_samples": sum(individual_frames),
@@ -149,6 +154,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
     detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
+                "interval_sample_quality": {"seen": seen, "skipped": skipped_intervals,
+                    "invalid_after_warmup": invalid_intervals, "used": len(rows)},
                 "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
                 "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases),
                 "reported_long_frames": {"samples": len(long_frames), "max_ms": max(long_frames, default=None),
@@ -156,6 +163,8 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     if not rows:
         return {"samples": 0, "status": "no matching positive frame-time samples", **detailed}
     med = {key: round(median(row[key] for row in rows), 3) for key in rows[0]}
+    # Do not round a positive sub-millisecond median to zero before comparison.
+    med["frame"] = median(row["frame"] for row in rows)
     frame = med["frame"]
     return {
         "samples": len(rows),
@@ -174,28 +183,44 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     }
 
 def compare(baseline, candidate):
-    """Compare matching workload interval summaries, not individual frames."""
-    if not baseline["samples"] or not candidate["samples"]:
+    """Compare independent interval and individual-frame populations."""
+    a, b = (report.get("median_reported_interval") for report in (baseline, candidate))
+    base_frames, cand_frames = (report["individual_frame_times"] for report in (baseline, candidate))
+    intervals = bool(a and b)
+    frame_samples = bool(base_frames["samples"] and cand_frames["samples"]
+                         and base_frames["duration_ms_rounded_samples"]
+                         and cand_frames["duration_ms_rounded_samples"])
+    if not intervals and not frame_samples:
         return {"status": "insufficient samples"}
-    a, b = baseline["median_reported_interval"], candidate["median_reported_interval"]
-    base_frames = baseline["individual_frame_times"]
-    cand_frames = candidate["individual_frame_times"]
-    base_fps = base_frames["approx_present_fps"]
-    cand_fps = cand_frames["approx_present_fps"]
+    interval_clean = intervals and not any(
+        report.get("interval_sample_quality", {}).get("invalid_after_warmup", 0)
+        for report in (baseline, candidate))
+    frame_clean = frame_samples and not any(
+        frames["invalid_batches"] for frames in (base_frames, cand_frames))
+    ratio = (cand_frames["samples"] * base_frames["duration_ms_rounded_samples"]
+             / (base_frames["samples"] * cand_frames["duration_ms_rounded_samples"])
+             if frame_clean else None)
     return {
-        "baseline_approx_present_fps": base_fps,
-        "candidate_approx_present_fps": cand_fps,
-        "approx_present_fps_ratio": round(cand_fps / base_fps, 3) if base_fps and cand_fps is not None else None,
+        "status": "both populations available" if interval_clean and frame_clean else "partial samples",
+        "baseline_approx_present_fps": base_frames["approx_present_fps"],
+        "candidate_approx_present_fps": cand_frames["approx_present_fps"],
+        "approx_present_fps_ratio": round(ratio, 3) if ratio is not None else None,
         "baseline_individual_frame_samples": base_frames["samples"],
         "candidate_individual_frame_samples": cand_frames["samples"],
+        "baseline_invalid_frame_batches": base_frames["invalid_batches"],
+        "candidate_invalid_frame_batches": cand_frames["invalid_batches"],
+        "baseline_frame_ms_percentiles": base_frames["frame_ms_percentiles"],
+        "candidate_frame_ms_percentiles": cand_frames["frame_ms_percentiles"],
         "baseline_samples": baseline["samples"],
         "candidate_samples": candidate["samples"],
-        "median_frame_ms_delta": round(b["frame"] - a["frame"], 3),
-        "median_frame_speedup": round(a["frame"] / b["frame"], 3) if b["frame"] > 0 else None,
-        "median_copy_back_mb_delta": round(b["back_mb"] - a["back_mb"], 3),
-        "median_dropped_draws_delta": round(b["dropped"] - a["dropped"], 3),
-        "candidate_clean_target_intervals": candidate["intervals_meeting_target_without_reported_drops"],
-        "note": "Same scene, settings and warmup required; no reported drops does not establish correct rendering."
+        "interval_comparison_usable": interval_clean,
+        "individual_comparison_usable": frame_clean,
+        "median_frame_ms_delta": round(b["frame"] - a["frame"], 3) if interval_clean else None,
+        "median_frame_speedup": round(a["frame"] / b["frame"], 3) if interval_clean else None,
+        "median_copy_back_mb_delta": round(b["back_mb"] - a["back_mb"], 3) if interval_clean else None,
+        "median_dropped_draws_delta": round(b["dropped"] - a["dropped"], 3) if interval_clean else None,
+        "candidate_clean_target_intervals": candidate.get("intervals_meeting_target_without_reported_drops"),
+        "note": "Same scene, settings and warmup required; missing or malformed populations are not zero. Individual durations are rounded. No reported drops does not establish correct rendering."
     }
 
 def main():
@@ -220,7 +245,7 @@ def main():
         print(json.dumps({"samples": 0, "status": "log unavailable"}))
         return 1
     print(json.dumps(report, indent=2, allow_nan=False))
-    return 0 if report["samples"] else 1
+    return 0 if report["samples"] or report["individual_frame_times"]["samples"] else 1
 
 if __name__ == "__main__":
     raise SystemExit(main())
