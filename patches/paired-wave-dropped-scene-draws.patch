@@ -459,8 +459,8 @@
 --- a/crates/victory-gpu/src/pipeline/host.rs
 +++ b/crates/victory-gpu/src/pipeline/host.rs
 @@ -92,85 +92,107 @@
--}
--
+ }
+ 
 -impl GraphicsState {
 -    /// Takes in one subobject of a stream: its type, then its data at +4
 -    /// (+8 for those holding pointers).
@@ -543,9 +543,6 @@
 -            }
 -        }
 -    }
--
-+}
-+
 +// Arithmetic only; readable, live external storage is still an ABI obligation.
 +fn input_layout_extent_valid<T>(ptr: *const T, count: usize) -> bool {
 +    if count == 0 {
@@ -650,4 +647,4 @@
 +        }
 +        true
 +    }
-+
+ 
