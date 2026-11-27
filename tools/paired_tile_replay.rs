@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 use super::*;
+use super::software_pages::{PageTable, SectionKey};
+const POOL_KEY: SectionKey = SectionKey { id: 1, generation: 1 };
 
 #[derive(Clone, Copy)]
 struct Mapping {
@@ -36,7 +38,16 @@ fn resolve(table: &[Option<usize>], backing: &[u8], address: usize, out: &mut [u
     true
 }
 
-fn check_texture(table: &[Option<usize>], backing: &[u8], destination: *const c_void) {
+fn resolve_both(table: &[Option<usize>], model: &PageTable, backing: &[u8], address: usize, out: &mut [u8]) -> bool {
+    let ok = resolve(table, backing, address, out);
+    let mut actual = vec![0; out.len()];
+    let result = model.read(address, &mut actual, |key| (key == POOL_KEY).then_some(backing));
+    assert_eq!(result.is_ok(), ok, "software page resolution differs");
+    if ok { assert_eq!(actual, out, "software page bytes differ"); }
+    ok
+}
+
+fn check_texture(table: &[Option<usize>], model: &PageTable, backing: &[u8], destination: *const c_void) {
     use victory_formats::texture::{Desc, Dimension, Layout, Swizzle};
 
     let layout = Layout::new(&Desc {
@@ -52,7 +63,7 @@ fn check_texture(table: &[Option<usize>], backing: &[u8], destination: *const c_
     })
     .unwrap();
     let mut tiled = vec![0; layout.size as usize];
-    assert!(resolve(table, backing, 0, &mut tiled));
+    assert!(resolve_both(table, model, backing, 0, &mut tiled));
     // SAFETY: the fixture mapped all four destination pages and the
     // table read above verified the requested range fits in them.
     let native = unsafe { std::slice::from_raw_parts(destination.cast::<u8>(), tiled.len()) };
@@ -88,6 +99,8 @@ fn replay(pool_pages: usize, slots: usize, operations: &[Mapping], exhaustive: b
 
     assert!(operations.iter().all(|op| op.destination < slots && op.source.is_none_or(|p| p < pool_pages)));
     let mut table = vec![None; slots];
+    let mut model = PageTable::default();
+    assert_eq!(super::software_pages::PAGE_BYTES, PAGE);
     let mut readback = vec![0; PAGE];
     for (index, mapping) in operations.iter().enumerate() {
         let start = mapping.destination * PAGE;
@@ -98,12 +111,17 @@ fn replay(pool_pages: usize, slots: usize, operations: &[Mapping], exhaustive: b
         assert!(map_alias(at as u64, from, PAGE as u64), "operation {index}");
         table[mapping.destination] = mapping.source;
         if let Some(source) = mapping.source {
+            model.map(mapping.destination, 1, POOL_KEY, source).unwrap();
+        } else {
+            model.unmap(mapping.destination, 1).unwrap();
+        }
+        if let Some(source) = mapping.source {
             // Mutate the backing through the stable view after the alias is mapped.
             // A software table pointing at a stale copy fails the full-page comparison.
             stable.bytes()[source * PAGE + PAGE - 1] = (index % 251) as u8;
             // SAFETY: the mapper successfully created this PAGE-byte view.
             let expected = unsafe { std::slice::from_raw_parts(at.cast::<u8>(), PAGE) };
-            assert!(resolve(&table, stable.bytes(), start, &mut readback));
+            assert!(resolve_both(&table, &model, stable.bytes(), start, &mut readback));
             assert_eq!(readback, expected, "operation {index}");
         } else {
             let mut info = std::mem::MaybeUninit::<MEMORY_BASIC_INFORMATION>::uninit();
@@ -124,7 +142,7 @@ fn replay(pool_pages: usize, slots: usize, operations: &[Mapping], exhaustive: b
                 MEM_RESERVE,
                 "operation {index}"
             );
-            assert!(!resolve(&table, stable.bytes(), start, &mut [0]));
+            assert!(!resolve_both(&table, &model, stable.bytes(), start, &mut [0]));
         }
         if exhaustive {
             for (slot, physical) in table.iter().enumerate() {
@@ -132,13 +150,13 @@ fn replay(pool_pages: usize, slots: usize, operations: &[Mapping], exhaustive: b
                     let addr = destination.wrapping_byte_add(slot * PAGE);
                     // SAFETY: this slot remains mapped from an earlier operation.
                     let expected = unsafe { std::slice::from_raw_parts(addr.cast::<u8>(), PAGE) };
-                    assert!(resolve(&table, stable.bytes(), slot * PAGE, &mut readback));
+                    assert!(resolve_both(&table, &model, stable.bytes(), slot * PAGE, &mut readback));
                     assert_eq!(readback, expected, "operation {index}, slot {slot}");
                 }
                 if physical.is_some() && table.get(slot + 1).is_some_and(Option::is_some) {
                     let at = (slot + 1) * PAGE - 13;
                     let mut crossing = [0; 53];
-                    assert!(resolve(&table, stable.bytes(), at, &mut crossing));
+                    assert!(resolve_both(&table, &model, stable.bytes(), at, &mut crossing));
                     // SAFETY: the two adjacent slots are both mapped.
                     let expected = unsafe {
                         std::slice::from_raw_parts(
@@ -153,7 +171,7 @@ fn replay(pool_pages: usize, slots: usize, operations: &[Mapping], exhaustive: b
     }
 
     if exhaustive {
-        check_texture(&table, stable.bytes(), destination);
+        check_texture(&table, &model, stable.bytes(), destination);
     }
 
     drop(stable);
