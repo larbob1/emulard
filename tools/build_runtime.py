@@ -63,6 +63,7 @@ def validate_paired(target, *, keep_going=False):
     def attempt(label, action):
         try:
             action()
+            print(f"Runtime validation passed: {label}", flush=True)
         except subprocess.CalledProcessError:
             if not keep_going:
                 raise

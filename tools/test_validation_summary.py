@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+import unittest
+from ci_compile import validation_summary
+
+class ValidationSummaryTests(unittest.TestCase):
+    def test_reports_each_mode_without_raw_output(self):
+        lines = [
+            b"Running runtime test: victory-hle physical_pages_map_alias_and_unmap\n",
+            b"Runtime test switches: VICTORY_MAP_DIFF=0\n",
+            b"private raw source\n",
+            b"Runtime validation passed: victory-hle physical_pages_map_alias_and_unmap\n",
+            b"Running runtime test: victory-hle physical_pages_map_alias_and_unmap\n",
+            b"Runtime test switches: VICTORY_MAP_DIFF=1\n",
+            b"Runtime validation failed: victory-hle physical_pages_map_alias_and_unmap\n",
+            b"Runtime validation passed: release build\n",
+        ]
+        self.assertEqual(validation_summary(lines), [
+            "passed: victory-hle physical_pages_map_alias_and_unmap [VICTORY_MAP_DIFF=0]",
+            "failed: victory-hle physical_pages_map_alias_and_unmap [VICTORY_MAP_DIFF=1]",
+            "passed: release build",
+        ])
+
+if __name__ == "__main__":
+    unittest.main()

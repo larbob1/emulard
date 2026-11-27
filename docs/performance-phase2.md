@@ -7,7 +7,7 @@ behavior is disabled unless `VICTORY_MAP_DIFF=1` is set.
   backing section and page index with the live view table. Only changed
   spans are unmapped and rebuilt. Wholly changed requests keep the old path, preserving contiguous mapping behavior. Unknown pages on aligned diff requests are rejected before changing mappings.
 - Disjoint, fully resolved aligned GPU alias requests snapshot source
-  slices and use the same diff path. Overlapping requests retain the previous semantics; incomplete disjoint aligned sources are rejected without mutation.
+  slices and use the same diff path. Overlapping requests and partial-source prefixes retain the previous semantics; disjoint aligned requests whose first source page is absent are rejected without mutation.
 - Consecutive already-identical scatter mappings are checked under one
   physical table lock and use one dirty notification for at most 256 pages.
   Changed requests and duplicate addresses retain the ordered fallback.
@@ -53,4 +53,4 @@ until all direct CPU dereferences have been audited.
 
 ## Stabilization update
 
-With `VICTORY_MAP_DIFF=1`, preflight rejects unknown physical IDs and missing disjoint aligned alias sources before modifying the destination. Range arithmetic overflow is rejected for all modes. Host mapping failures remain non-transactional; the fixture checks preflight behavior, not rollback.
+With `VICTORY_MAP_DIFF=1`, preflight rejects unknown physical IDs and disjoint aligned alias requests with no first source page before modifying the destination. Partial-source prefixes retain the original mapper's behavior. Range arithmetic overflow is rejected for all modes. Host mapping failures remain non-transactional; the fixture checks preflight behavior, not rollback.

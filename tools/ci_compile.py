@@ -11,12 +11,34 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 
+def validation_summary(lines):
+    # Only emit fixed suite names, statuses and allowlisted binary flags.
+    # Associate switches with the result for that individual invocation.
+    switches = b""
+    results = []
+    for line in lines:
+        if re.fullmatch(rb"Running runtime test: victory-[a-z-]+ [A-Za-z0-9_]+\s*", line):
+            switches = b""
+        setting = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
+        if setting:
+            switches = setting[1].strip()
+        status = re.fullmatch(rb"Runtime validation (passed|failed): ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
+        if status:
+            extra = b" [" + switches + b"]" if switches and status[2].startswith(b"victory-") else b""
+            results.append((status[1] + b": " + status[2] + extra).decode("ascii"))
+            switches = b""
+    return results
+
 def run_stage(label, args, cwd):
     # Do not publish external source excerpts, local paths or raw tool logs.
     # Report only a stage name, exit status, and structured Rust error codes.
     print(f"Starting: {label}", flush=True)
     with tempfile.TemporaryFile(mode="w+b") as output:
         result = subprocess.run(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT)
+        if label == "Paired-wave tests and release/diag compilation":
+            output.seek(0)
+            for summary in validation_summary(output):
+                print("Validation result: " + summary, flush=True)
         if result.returncode:
             output.seek(0)
             codes = set()
