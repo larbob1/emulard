@@ -53,6 +53,19 @@ class MemoryReportTests(unittest.TestCase):
         self.assertEqual(groups["holders"]["invalid_records"], 1)
         self.assertNotIn("private-secret", json.dumps(result))
 
+    def test_truncated_bare_primary_record_is_an_invalid_gap(self):
+        group = summarize([memory(), "memory: 123 MB",
+                           "  memory:", "memory: malformed",
+                           "video memory: 100 MB in use",
+                           "host copies of title memory: 2 alive 3 MB",
+                           memory(made=11)])["groups"]["memory"]
+        self.assertEqual(group["valid_records"], 2)
+        self.assertEqual(group["invalid_records"], 3)
+        rows = group["recent_observations"]
+        self.assertEqual([r["line"] for r in rows], [1, 2, 3, 4, 7])
+        self.assertEqual(rows[-1]["change_status"], "prior_record_invalid")
+        self.assertIsNone(rows[-1]["adjacent_change"])
+
     def test_sweep_and_asked_spans_have_distinct_semantics(self):
         def sweep(n, mb, asked):
             return (f"memory let go since the start: {n} windows outside buffers {mb} MB, "
@@ -123,6 +136,25 @@ class GridComparisonTests(unittest.TestCase):
         self.assertEqual(result["groups"]["memory"]["fields"]["host_copy_mib"]["last_difference"], -52)
         self.assertFalse(result["groups"]["sweep"]["comparison_usable"])
         self.assertEqual(result["groups"]["sweep"]["fields"], {})
+
+    def test_nonboolean_confirmation_does_not_certify_grid_comparison(self):
+        a, b = self.reports()
+        for confirmed in (1, "yes", "false", [True], None):
+            with self.subTest(confirmed=confirmed):
+                result = compare_grids(a, b, confirmed)
+                self.assertFalse(result["operator_confirmed_matched_completed_phase"])
+                self.assertFalse(result["comparison_usable"])
+                self.assertEqual(result["groups"]["memory"]["fields"], {})
+
+    def test_truncated_primary_record_blocks_grid_comparison(self):
+        a, b = self.reports()
+        coverage = "memory, windows: the 3000 MB of windows lie over 2000 MB of title memory (the rest is memory that is in more than one window, and is copied once for each); host lists never reset since they were made: 9"
+        b = summarize([memory(), "memory: 123 MB",
+                       HOLDERS.replace("4096 KiB", "2048 KiB"), coverage])
+        result = compare_grids(a, b, True)
+        self.assertFalse(result["comparison_usable"])
+        self.assertIn("candidate_primary_or_coverage_evidence_invalid_or_missing",
+                      result["issues"])
 
     def test_mixed_wrong_missing_and_invalid_grid(self):
         a,b = self.reports()

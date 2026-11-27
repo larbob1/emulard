@@ -84,10 +84,13 @@ def summarize(lines):
             starts = list(re.finditer(r"(?<!\S)" + re.escape(marker), line))
             if not starts:
                 continue
-            # The primary line itself contains "title memory:" later;
-            # distinguish the leading private-memory signature before counting.
+            # A bare primary message marker remains recognizable even
+            # when truncated. For arbitrary logger prefixes require the
+            # private-memory signature; do not count embedded title/video
+            # memory markers as primary records.
             if name == "memory":
-                starts = [m for m in starts if re.match(
+                message_start = len(line) - len(line.lstrip())
+                starts = [m for m in starts if m.start() == message_start or re.match(
                     r"memory:\s+\S+\s+MB private", line[m.start():])]
                 if not starts:
                     continue
@@ -151,7 +154,7 @@ def clean(group):
 def compare_grids(baseline, candidate, confirmed=False):
     a, b = baseline["groups"], candidate["groups"]
     issues = []
-    if not confirmed:
+    if confirmed is not True:
         issues.append("matched_completed_phase_not_operator_confirmed")
     for report, groups, expected, label in (
             (baseline, a, 4096, "baseline"), (candidate, b, 2048, "candidate")):
@@ -181,7 +184,7 @@ def compare_grids(baseline, candidate, confirmed=False):
                     "max_difference": right["max"] - left["max"],
                 }
     return {
-        "operator_confirmed_matched_completed_phase": confirmed,
+        "operator_confirmed_matched_completed_phase": confirmed is True,
         "comparison_usable": not issues,
         "issues": issues,
         "groups": observations,
