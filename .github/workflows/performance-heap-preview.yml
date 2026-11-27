@@ -1,0 +1,43 @@
+name: Prepared heap retention review
+on:
+  push:
+    branches: ['dev/performance-phase6-heap-retention-preview-check']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dbac4c6ea21d9580f5b0bd39ba2b9d6c4eb6f2b1
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: f184da6e65828bd847cdcbdc326caec6ba67aca9
+          path: proposal
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify read-only exact prepared preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/review-runtime"
+          if ! python source/tools/build_runtime.py "$runtime" --paired-wave-refresh > "$RUNNER_TEMP/prepare.log" 2>&1; then
+            echo "Pinned preparation failed"
+            exit 1
+          fi
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/before.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/before.status"
+          python proposal/tools/propose_heap_pass_retention.py "$runtime" > "$RUNNER_TEMP/preview.diff"
+          test "$(grep -c '^+++ ' "$RUNNER_TEMP/preview.diff")" = 2
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/after.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/after.status"
+          cmp "$RUNNER_TEMP/before.diff" "$RUNNER_TEMP/after.diff"
+          cmp "$RUNNER_TEMP/before.status" "$RUNNER_TEMP/after.status"
+          echo "All four exact heap retention anchors accepted; two files previewed; tracked diff and status unchanged"
