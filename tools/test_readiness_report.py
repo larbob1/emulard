@@ -30,10 +30,45 @@ class ReadinessReportTests(unittest.TestCase):
         ])
         self.assertEqual(report["builder"]["ready_reports"], 1)
         self.assertEqual(report["builder"]["disabled_reports"], 1)
+        self.assertEqual(report["builder"]["latest_observed_state"], "disabled_unconditional")
+        self.assertEqual(report["builder"]["last_numeric_quality"], "not_applicable")
+        self.assertIsNone(report["builder"]["last_missing"])
+        self.assertIsNone(report["builder"]["last_total"])
+
+    def test_builder_numeric_quality_and_no_stale_counts(self):
+        ready = "the ray-tracing structure builder runs: all of its programs have host pipelines"
+        disabled = "the ray-tracing structure builder stays off:"
+        for fields, quality in [
+            ("missing=3 of=2", "invalid"), ("missing=0 of=2", "invalid"),
+            ("missing=3 of=52 missing=bad", "invalid"),
+            ("missing=3", "missing"), ("missing=3 of=52.5", "invalid"),
+        ]:
+            report = summarize_readiness([ready + " pipelines=52", disabled + " " + fields])
+            builder = report["builder"]
+            self.assertEqual(builder["latest_observed_state"], "disabled_missing_pipelines")
+            self.assertEqual(builder["last_numeric_quality"], quality)
+            self.assertEqual(builder["unusable_numeric_reports"], 1)
+            self.assertIsNone(builder["last_missing"])
+            self.assertIsNone(builder["last_total"])
+        for fields in ("pipelines=52 pipelines=bad", "pipelines=52.5", "pipelines=52x"):
+            builder = summarize_readiness([ready + " " + fields])["builder"]
+            self.assertEqual(builder["last_numeric_quality"], "invalid")
+            self.assertIsNone(builder["last_missing"])
+            self.assertIsNone(builder["last_total"])
+
+    def test_builder_fields_before_message(self):
+        report = summarize_readiness([
+            "missing=3 of=52 the ray-tracing structure builder stays off: not all of its programs have a host pipeline"
+        ])
+        self.assertEqual(report["builder"]["last_missing"], 3)
+        self.assertEqual(report["builder"]["last_total"], 52)
+        self.assertEqual(report["builder"]["last_numeric_quality"], "valid")
 
     def test_empty_log_has_no_inferred_success(self):
         report = summarize_readiness([])
         self.assertIsNone(report["builder"]["last_missing"])
+        self.assertEqual(report["builder"]["latest_observed_state"], "unobserved")
+        self.assertEqual(report["builder"]["last_numeric_quality"], "unobserved")
         self.assertEqual(report["frame"]["samples"], 0)
 
 if __name__ == "__main__":

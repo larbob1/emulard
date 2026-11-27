@@ -24,9 +24,6 @@ REASONS = {
     "relative_register": ("relative VGPR", "relative register", "relative vgpr"),
 }
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-BUILDER_MISSING = re.compile(r"\bmissing=(\d+)\b")
-BUILDER_TOTAL = re.compile(r"\bof=(\d+)\b")
-BUILDER_READY = re.compile(r"\bpipelines=(\d+)\b")
 PAGES = re.compile(r"\bpages=(\d+)\b")
 DIRTY = re.compile(r"\bdirty_pages=(\d+)\b")
 
@@ -36,10 +33,49 @@ def number(pattern, line):
         return int(match[1])
     return None
 
+def builder_field(line, key):
+    # Count assignments, not only successful numeric matches. One valid
+    # assignment plus one malformed assignment is still ambiguous.
+    matches = re.findall(rf"(?:^|\s){key}=([^\s]*)", line)
+    if not matches:
+        return None, "missing"
+    if len(matches) != 1 or not re.fullmatch(r"[0-9]{1,12}", matches[0]):
+        return None, "invalid"
+    return int(matches[0]), "valid"
+
+
+def builder_event(builder, line, state):
+    builder["latest_observed_state"] = state
+    builder["last_missing"] = builder["last_total"] = None
+    if state == "disabled_unconditional":
+        builder["last_numeric_quality"] = "not_applicable"
+        return
+    if state == "ready_report":
+        total, quality = builder_field(line, "pipelines")
+        if quality == "valid":
+            builder["last_missing"], builder["last_total"] = 0, total
+    else:
+        missing, mq = builder_field(line, "missing")
+        total, tq = builder_field(line, "of")
+        quality = ("invalid" if "invalid" in (mq, tq) else
+                   "missing" if "missing" in (mq, tq) else "valid")
+        if quality == "valid":
+            if not 0 < missing <= total:
+                quality = "invalid"
+            else:
+                builder["last_missing"], builder["last_total"] = missing, total
+    builder["last_numeric_quality"] = quality
+    if quality != "valid":
+        builder["unusable_numeric_reports"] += 1
+
+
 def summarize_readiness(lines, skip=0):
     counts = dict.fromkeys((*REASONS, "other"), 0)
     builder = {"ready_reports": 0, "disabled_reports": 0,
-               "last_missing": None, "last_total": None}
+               "last_missing": None, "last_total": None,
+               "latest_observed_state": "unobserved",
+               "last_numeric_quality": "unobserved",
+               "unusable_numeric_reports": 0}
     memory = {"fault_reports": 0, "reported_missing_pages": 0,
               "completed_feedback_reports": 0, "reported_dirty_pages": 0,
               "directory_capacity_reports": 0}
@@ -52,14 +88,13 @@ def summarize_readiness(lines, skip=0):
                 counts[reason] += 1
             if "the ray-tracing structure builder stays off:" in line:
                 builder["disabled_reports"] += 1
-                builder["last_missing"] = number(BUILDER_MISSING, line)
-                builder["last_total"] = number(BUILDER_TOTAL, line)
+                builder_event(builder, line, "disabled_missing_pipelines")
             elif "the ray-tracing structure builder is turned off" in line:
                 builder["disabled_reports"] += 1
+                builder_event(builder, line, "disabled_unconditional")
             elif "the ray-tracing structure builder runs: all of its programs have host pipelines" in line:
                 builder["ready_reports"] += 1
-                builder["last_missing"] = 0
-                builder["last_total"] = number(BUILDER_READY, line)
+                builder_event(builder, line, "ready_report")
             if "shaders touched pages that had no copy" in line:
                 memory["fault_reports"] += 1
                 memory["reported_missing_pages"] += number(PAGES, line) or 0
@@ -77,7 +112,9 @@ def summarize_readiness(lines, skip=0):
         "memory": memory,
         "note": ("Counts of observed log messages, not unique shaders or proof of correctness. "
                  "Warnings may be rate-limited; missing messages are not evidence of success. "
-                 "A ready builder report means pipelines exist, not that their results are valid.")
+                 "Builder state is the latest observed message, not a live state query; "
+                 "a ready builder report means pipelines exist, not that their results are valid. "
+                 "Unconditional shutdown has no pipeline count; stale counts are cleared.")
     }
 
 def main():
