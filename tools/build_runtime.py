@@ -20,6 +20,27 @@ def build_binaries(target):
     run(["cargo", "build", "--locked", "--release", "-p", "victory"], target)
     run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target)
 
+def validate_paired(target):
+    for mode in ("0", "1"):
+        env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
+        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
+    for runs in ("0", "1"):
+        env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS=runs)
+        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
+        subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping"], cwd=target, env=env, check=True)
+    run(["cargo", "test", "--locked", "-p", "victory-hle", "perf6_worker_tests"], target)
+    run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_tests"], target)
+    run(["cargo", "test", "--locked", "-p", "victory-gpu", "perf4_tests"], target)
+    for enabled in ("0", "1"):
+        env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
+        for suite in ("difference_tests", "merge_tests"):
+            subprocess.run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], cwd=target, env=env, check=True)
+    for suite in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
+        run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], target)
+    run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
+    run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
+    build_binaries(target)
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("checkout", type=Path, help="new directory outside this repository")
@@ -67,25 +88,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_disk_worker_perf.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
-                for mode in ("0", "1"):
-                    env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
-                    subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
-                for runs in ("0", "1"):
-                    env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS=runs)
-                    subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "physical_pages_map_alias_and_unmap"], cwd=target, env=env, check=True)
-                    subprocess.run(["cargo", "test", "--locked", "-p", "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping"], cwd=target, env=env, check=True)
-                run(["cargo", "test", "--locked", "-p", "victory-hle", "perf6_worker_tests"], target)
-                run(["cargo", "test", "--locked", "-p", "victory-gpu", "mapping_tests"], target)
-                run(["cargo", "test", "--locked", "-p", "victory-gpu", "perf4_tests"], target)
-                for enabled in ("0", "1"):
-                    env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
-                    for suite in ("difference_tests", "merge_tests"):
-                        subprocess.run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], cwd=target, env=env, check=True)
-                for suite in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
-                    run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], target)
-                run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
-                run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
-                build_binaries(target)
+                validate_paired(target)
             else:
                 print("Patched source prepared; compilation not attempted.")
             return 0

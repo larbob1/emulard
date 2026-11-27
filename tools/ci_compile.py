@@ -23,6 +23,8 @@ def run_stage(label, args, cwd):
             preparation = set()
             unresolved = set()
             locations = set()
+            patches = set()
+            categories = set()
             for line in output:
                 codes.update(re.findall(rb"error\[(E[0-9]{4})\]", line))
                 if b"error[E0425]" in line:
@@ -33,6 +35,25 @@ def run_stage(label, args, cwd):
                 if label == "Pinned source preparation":
                     for name in re.findall(rb"apply_[a-z_]+\.py", line):
                         preparation.add(name.decode("ascii"))
+                    for name in re.findall(rb"[a-z0-9][a-z0-9-]+\.patch", line):
+                        patches.add(name.decode("ascii"))
+                    for phrase, category in (
+                        (b"patch does not apply", "patch context mismatch"),
+                        (b"patch failed", "patch context mismatch"),
+                        (b"source anchor", "source anchor mismatch"),
+                        (b"could not resolve host", "network DNS failure"),
+                        (b"could not read username", "authentication unavailable"),
+                        (b"repository not found", "upstream repository unavailable"),
+                        (b"failed to connect", "network connection failure"),
+                        (b"unable to access", "upstream access failure"),
+                        (b"trailing whitespace", "patch whitespace failure"),
+                    ):
+                        if phrase in line.lower():
+                            categories.add(category)
+            if categories:
+                print("Preparation failure categories: " + ", ".join(sorted(categories)))
+            if patches:
+                print("Patch names mentioned: " + ", ".join(sorted(patches)))
             if preparation:
                 print("Preparation scripts mentioned: " + ", ".join(sorted(preparation)))
             if unresolved:
@@ -63,8 +84,10 @@ def main():
             )
             prepare = [sys.executable, str(ROOT / "tools" / "build_runtime.py"), str(target)]
             if args.paired_wave_refresh:
-                run_stage("Paired-wave preparation, tests and release/diag compilation",
-                          prepare + ["--paired-wave-refresh", "--build"], ROOT)
+                run_stage("Pinned source preparation", prepare + ["--paired-wave-refresh"], ROOT)
+                run_stage("Pinned Rust toolchain", ["cargo", "--version"], target)
+                run_stage("Paired-wave tests and release/diag compilation",
+                          [sys.executable, str(ROOT / "tools" / "ci_paired_tests.py"), str(target)], ROOT)
                 print("Paired-wave compile and test checks completed. No gameplay execution was attempted.", flush=True)
                 return 0
             if args.lighting_memory:

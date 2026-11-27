@@ -60,5 +60,6 @@ actual test results and benchmarks before closing items.
   passed the Python test step (93 tests) and standalone range-gate test step
   (4 tests). This resolves the synthetic anchor-test failure, not P01/P09/P24
   as a whole. The Windows runtime validation
-  [run](https://github.com/larbob1/emulard/actions/runs/45935865574) was still
-  in progress when this evidence was recorded. No gameplay benchmark is recorded.
+  [run](https://github.com/larbob1/emulard/actions/runs/45935865574) failed in the combined preparation/build stage (exit 1, no specific Rust
+  diagnostics). Phase 6 subsequently separates preparation from compilation
+  and reports sanitized patch names and failure categories. No gameplay benchmark is recorded.
