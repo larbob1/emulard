@@ -13,7 +13,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters and actual rounded individual frame distributions from detailed frame batches. Critical-path attribution and real workload verification remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
 | P05 | 2 | Open | Full placeholder interval tracking and coalescing/splitting optimization; demonstrate fewer host calls on captured workloads. |
-| P06 | 2 | Open | Transactional mapper failure recovery, checked map/unmap results, rollback or documented failure semantics; fault-injection tests. |
+| P06 | 2 | Candidate | Diff mapper now rejects unknown physical IDs and missing disjoint source ranges before changing views; checked range overflow and regression cases added. Host map/unmap failure recovery, rollback, and fault injection remain open. |
 | P07 | 2 | Open | Batch changed scatter operations without changing ordering, duplicate-address behavior, or failure semantics. |
 | P08 | 2 | Candidate | Ported existing diagnostic trace and stable-backing tile replay fixture to paired-wave; validate runtime fixture with flags off/on, captured replay and partial/overlapping aliases. |
 | P09 | 3 | Prototype | Range-aware locking: migrate audited runtime writers and readers to scoped gates; protect complete views reconstructed by unmap, handle alias invalidation and lock ordering. Prototype in probes/range_gate.rs only. |
@@ -81,3 +81,5 @@ P01/P24: the cumulative paired-wave test runner now requires at least one passin
 - P01/P24 remain open; P02/P03/P08 have candidates, not completed acceptance. P04–P07, P09–P17, P18–P23 remain as listed in the table. No FPS result or closure is claimed.
 
 P03: detailed present-to-present frame batches now produce independent p50/p90/p95/p99 and maximum frame times, with count validation and separate warmup exclusion. No runtime measurements are available.
+
+P06: preflight failures now leave existing aligned diff mappings intact, and range overflow is rejected before mutation. This is not transactional host failure recovery. Existing native map/unmap error paths still require a separate audit and fault injection; no closure claimed.
