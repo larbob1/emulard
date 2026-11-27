@@ -62,6 +62,17 @@ class FrameReportTests(unittest.TestCase):
         self.assertEqual(report["reported_long_frames"]["max_ms"], 400)
         self.assertEqual(report["reported_long_frames"]["omitted_count"], 4)
 
+    def test_cumulative_counters_not_summed(self):
+        report = summarize([sample(), "private mapping diff totals calls=2 saved=10 mapped=3 scatter=4",
+                            "mapping diff totals calls=4 saved=17 mapped=6 scatter=7",
+                            "texture short-lock totals calls=8 bytes=512 copy_us=30 unlocked_us=90 retries=1",
+                            "unchanged physical mapping requests skipped count=16"])
+        counts = report["latest_cumulative_counters"]
+        self.assertEqual(counts["mapping diff totals"]["saved"], 17)
+        self.assertEqual(counts["texture short-lock totals"]["retries"], 1)
+        self.assertEqual(counts["unchanged physical mapping requests skipped"]["count"], 16)
+        self.assertNotIn("private", str(report))
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

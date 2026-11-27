@@ -9,8 +9,8 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | ID | Origin | Status | Outstanding work / acceptance evidence |
 | --- | --- | --- | --- |
 | P01 | 1 | Open | Compile the paired-wave candidate, run phase 1–6 tests on Windows and Proton, including aliases, partial failures, concurrent readers and replay. Record real results. |
-| P02 | 1 | Open | Matched scene benchmarking after warmup with capture off; collect frame wall time, median and tail latency, dropped draws, GPU/CPU utilization and mapping counts. Compare native Windows and Proton. |
-| P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Full per-frame distribution, later counters and critical-path attribution remain open. |
+| P02 | 1 | Candidate | Local repeat-pair numeric benchmark aggregator added. Actual matched gameplay runs, CPU/GPU utilization, frame-level tails and native Windows versus Proton comparison remain open. |
+| P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters. Full per-frame distribution and critical-path attribution remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
 | P05 | 2 | Open | Full placeholder interval tracking and coalescing/splitting optimization; demonstrate fewer host calls on captured workloads. |
 | P06 | 2 | Open | Transactional mapper failure recovery, checked map/unmap results, rollback or documented failure semantics; fault-injection tests. |
@@ -69,3 +69,5 @@ actual test results and benchmarks before closing items.
 ## Deferred resolution work
 
 P08: ported the existing tile replay fixture and optional local mapping trace to paired-wave. Test calls run with mapping flags off and on. Trace files contain virtual addresses and are local-only; do not upload them. Actual compiled replay and captured title validation are still pending. No IDs closed.
+
+P02/P03: added local matched-pair aggregation and allowlisted cumulative counters. Real gameplay measurements and critical-path timing are not available. Use at least three matched pairs, with visual scene confirmation by the operator.

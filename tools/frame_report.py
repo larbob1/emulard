@@ -54,12 +54,33 @@ def percentile(values, fraction):
     ordered = sorted(values)
     return ordered[max(0, ceil(len(ordered) * fraction) - 1)] if ordered else None
 
+# Cumulative power-of-two counters, not per-frame samples. Keep only
+# numeric allowlisted fields; output the latest observed record, not sums.
+COUNTERS = {
+    "mapping diff totals": ("calls", "saved", "mapped", "scatter"),
+    "texture short-lock totals": ("calls", "bytes", "copy_us", "unlocked_us", "retries"),
+    "unchanged physical mapping requests skipped": ("count",),
+}
+def update_counters(latest, line):
+    for message, fields in COUNTERS.items():
+        if message not in line:
+            continue
+        values = {}
+        for field in fields:
+            match = re.search(rf"\b{field}=([0-9]+)\b", line)
+            if match:
+                values[field] = int(match[1])
+        if len(values) == len(fields):
+            latest[message] = values
+
 def summarize(lines, skip=0):
     rows = []
     seen = 0
     remaps, aliases, long_frames = [], [], []
     omitted_long = 0
+    cumulative = {}
     for line in lines:
+        update_counters(cumulative, line)
         if seen >= skip:
             long = LONG_FRAME.search(line)
             if long:
@@ -82,7 +103,8 @@ def summarize(lines, skip=0):
             row = {key: float(value) for key, value in match.groupdict().items()}
             if row["frame"] > 0:
                 rows.append(row)
-    detailed = {"long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
+    detailed = {"latest_cumulative_counters": cumulative,
+                "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
                 "alias_rate_samples": len(aliases), "alias_rates_per_second": stats(aliases),
                 "reported_long_frames": {"samples": len(long_frames), "max_ms": max(long_frames, default=None),
                     "omitted_count": omitted_long, "note": "Selected slow frames only; not a full distribution."}}
