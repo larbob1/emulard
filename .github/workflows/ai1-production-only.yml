@@ -1,0 +1,44 @@
+name: AI1 production-only scratch rehearsal
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_production_only.py'
+      - '.github/workflows/ai1-production-only.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  production-only:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-production-only-rehearsal'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: ['000', '111']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 773f539df1275e7dc29a6f3000d35060c6a60e8b
+          path: ai1-pr95
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_production_only.py
+      - name: Rehearse selected production-only source
+        run: python tools/validate_ai1_production_only.py --preview ai1-pr95 --arm ${{ matrix.arm }}
