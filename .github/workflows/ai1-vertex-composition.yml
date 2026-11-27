@@ -1,0 +1,43 @@
+name: AI1 isolated vertex composition
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_vertex_composition.py'
+      - '.github/workflows/ai1-vertex-composition.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  vertex-composition:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-vertex-composition'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 3b22fabc99cef39f20b87abe67e8e4e1a9c0e6c1
+          path: ai0-pr66
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 2d97a632ce340e84e8bb04b26aaab211b8dd6e3b
+          path: ai0-pr67
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile and validate combined vertex changes
+        run: python tools/validate_ai1_vertex_composition.py --pr66 ai0-pr66 --pr67 ai0-pr67
