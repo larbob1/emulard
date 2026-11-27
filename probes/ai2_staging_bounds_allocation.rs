@@ -3,6 +3,23 @@
 #[cfg(all(test, feature = "diagnostics"))]
 mod ai2_staging_bounds_allocation {
     use super::*;
+    use windows::core::Interface;
+    use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, DXGI_ADAPTER_FLAG_SOFTWARE};
+
+    fn strict_software_host() -> &'static crate::host::Host {
+        assert_eq!(std::env::var("VICTORY_D3D12_WARP").as_deref(), Ok("1"));
+        let adapter = crate::host::warp_adapter().expect("strict WARP adapter");
+        let desc = unsafe { adapter.cast::<IDXGIAdapter1>().unwrap().GetDesc1().unwrap() };
+        assert_ne!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32, 0);
+        let h = host().expect("actual runtime host");
+        // The same GetAdapterLuid binding is used by Host initialization.
+        let actual = unsafe { h.device.GetAdapterLuid() };
+        let expected = desc.AdapterLuid;
+        assert_eq!((actual.HighPart, actual.LowPart), (expected.HighPart, expected.LowPart));
+        eprintln!("staging_adapter actual_high={} actual_low={} warp_high={} warp_low={} software=1",
+                  actual.HighPart, actual.LowPart, expected.HighPart, expected.LowPart);
+        h
+    }
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
     use victory_formats::texture::{Desc, Dimension, Layout, Swizzle};
     use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_BC1_UNORM, DXGI_SAMPLE_DESC};
@@ -37,8 +54,7 @@ mod ai2_staging_bounds_allocation {
     #[test]
     fn actual_staging_extent_descriptor_compatibility() {
         assert_eq!(std::env::var("VICTORY_D3D12_WARP").as_deref(), Ok("1"));
-        assert!(crate::host::warp_adapter().is_ok());
-        let h = host().expect("software host");
+        let h = strict_software_host();
         for (dim, w, hgt, depth, mips, elem, block, format, want_total, want_full) in [
             (Dimension::Tex2d,4,2,1,1,1,1,DXGI_FORMAT_R8_UNORM,260,512),
             (Dimension::Tex2d,64,2,1,1,4,1,DXGI_FORMAT_R8G8B8A8_UNORM,512,512),
@@ -92,8 +108,7 @@ mod ai2_staging_bounds_allocation {
         assert_eq!(std::env::var("VICTORY_D3D12_WARP").as_deref(), Ok("1"));
         assert_eq!(std::env::var("VICTORY_STAGING_POOL").as_deref(), Ok(expected.as_str()));
         assert_eq!(staging_pool(), pool);
-        assert!(crate::host::warp_adapter().is_ok());
-        let h = host().expect("software host");
+        let h = strict_software_host();
         let (layout, footprints, rows, active, total) = r8(h, 4, 2);
         let required = staging_extent(total, &footprints, &rows, &active, &layout, 1).unwrap();
         assert_eq!((total, required), (260, 512));
