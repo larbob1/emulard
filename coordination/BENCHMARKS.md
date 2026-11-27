@@ -19,3 +19,5 @@ B003: known-revision local build succeeded, owner observed first cutscene start;
 B003 offline follow-up #27 7210705368: 17s first-cutscene transition, working set 3637→12430 MiB, private 2566→3191, live host-copy capacity 202→3703, loose windows 28→3000, nonlocal 1001→4309, live staging 342→19 MiB. Categories overlap; no leak/ownership/causal proof. Worst present interval 12637ms, 3455 remaps/9295ms aggregate; overlapping counts not additive. Existing window ownership/coverage telemetry requested; no further launch or switch changes pending review.
 
 B003 ownership follow-up #27 7210742582: late 658/3000MiB live windows all extra Arc holders, 648/2960MiB COM holders, 1199MiB ever copied, 2276MiB union, 4/16MiB unsized, grid 4096KiB. Overlapping rounded capacity, no reclaimable RSS or dead heap attribution. Pipeline library unavailable, sampled queue peak 1196; cause unknown. No rerun.
+
+D17 owner-authorized bounded local testing resumes; #27 7210804163 defines scope and safeguards. No new benchmark observation yet; B003 remains startup/cutscene only. Formal acceptance unchanged.
