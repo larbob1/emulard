@@ -228,6 +228,14 @@ unchanged scatter requests and try placeholder coalescing before splitting.
 See [phase 2 performance validation](docs/performance-phase2.md). This is
 opt-in and not yet compiled or benchmarked.
 
+### Experimental short-lock texture snapshots
+
+Set `VICTORY_TEXTURE_SHORT_LOCK=1` in the paired-wave Phase 3 candidate
+for bounded snapshots that release the mapping guard before hashing and
+detiling. It is opt-in; no sustained FPS gain has been verified. See
+[phase 3 validation](docs/performance-phase3.md) and the cumulative
+[performance deferred-work register](docs/performance-deferred.md).
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`
