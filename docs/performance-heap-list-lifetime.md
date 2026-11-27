@@ -135,3 +135,54 @@ submission is introduced. A production proposal requires AI1/AI3
 agreement, exact prepared source audit, deterministic native ordering
 and independently established recorded/in-flight/replay lifetime and
 completion contracts. No RSS or FPS attribution.
+
+## Native detached-recording milestone and completion review
+
+Exact isolated #53 (8b3d97c72dc5d87af55cbdd3ca1d432851a4e268,
+based on ad4cc8956c11c760b2fb263a65bcba38d7a813ca) native CI
+45952737960/job140352102981 completed successfully. Both fresh
+VICTORY_D3D12_WARP=1 fixtures passed exactly one test: the expanded
+heap slot rewrite observation and detached list reset/release ownership.
+Both release and diagnostics builds passed. This supersedes the earlier
+pending native status for those exact fixtures only. Neither fixture
+submits GPU commands, so actual in-flight or replay ownership is not proven.
+
+Raw pinned host.rs (51700c6) review:
+- execute_late transfers Detached lists and order into Flight after submit,
+  retaining the submission guard through insertion into LINE. Flight also
+  retains card/back/texture range information. The queue fence value and
+  logical submission number are distinct.
+- relay_worker uses the observed host fence value and landable to select
+  an ordered prefix. relay_land performs readbacks and hand-back before
+  advancing FINISHED and burying retired objects. land transfers landed
+  lists to recycle outside LINE; this is separate from GPU completion.
+- Non-relay settle, around lines 5317-5327, warns on
+  SetEventOnCompletion failure and continues; it also ignores the
+  WaitForSingleObject return value. The later device-removal check alone
+  cannot establish that the requested fence completed. The normal path
+  performs hand-back, readbacks, bottom-of-pipe writes/signals, FINISHED
+  publication, retirement and eventual list recycling.
+- Synchronous submit, around lines 5608-5623, likewise warns on Signal
+  or SetEventOnCompletion failure and ignores the wait result. The
+  subsequent FINISHED.store and bury around 5646 are not guarded by
+  an independently verified completed-fence value in this raw path.
+
+This is a potential failure-path correctness gap, not a demonstrated
+failure on WARP, Proton or a title. The two inspected graphics patch
+files do not directly modify those wait calls; the full combined
+prepared postimage and other completion domains still need review.
+Do not infer safe earlier reclamation from a successful normal-path
+ownership fixture, or from logical submission numbers alone.
+
+Proposed review gate, not an implementation: distinguish successful
+event registration, successful wait return, actual completed target
+and device-removal/unknown outcomes. In isolated test-only failure
+seams, cover signal failure, event registration failure, failed wait,
+unreached target, device removal and successful completion. An
+unconfirmed submission must not be treated as completed by a new
+reclamation policy, publish successful title completion, or recycle
+in-flight list owners. A reviewed recovery/termination contract must
+preserve ownership until safe, avoid indefinite waits or retry loops,
+and not turn uncertainty into a successful fence signal. Confirm the
+actual prepared source and coordinate with AI1/AI3 before changing
+shared submission or retirement behavior. No title launch authorized.
