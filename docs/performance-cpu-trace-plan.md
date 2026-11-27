@@ -92,3 +92,20 @@ rename or extrapolation.
 No native runtime edits or gameplay evidence in this proposal. Request
 coordinator review before any shared build registration. Existing P18
 host sampler can collect resource pressure independently.
+
+## Offline CPU-only summary (implemented)
+
+    python3 tools/cpu_trace_report.py local-cpu-trace.jsonl > cpu-summary.json
+
+Consumes the separate numeric JSONL records defined above, not ordinary frame
+logs or the causal GPU trace. The portable producer has no runtime wiring yet.
+Checks the 256-span and 600-window limits, exact boundary and schema, consecutive
+sequence starting at 1, adjacent timestamps, complete producer flags, valid
+nonoverlapping selected spans and exactly one terminal present call. Any
+rejection or sequence gap suppresses the aggregate; no missing trailing record
+detection is possible without a future capture-end record. Output is numeric
+elapsed-weighted category fractions and per-window median/p95/p99/max (including
+zero for absent categories), call counts and unattributed elapsed fraction.
+Outer calls include waiting and nested work; neither CPU busy time nor display
+FPS is inferred. No raw timestamps or identifiers exported. Exit 0 means
+supplied records structurally usable, 1 unavailable, 2 incomplete/invalid.
