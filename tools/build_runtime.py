@@ -61,6 +61,7 @@ def main():
             run(["git", "apply", str(own / "patches" / "paired-wave-worker-tracing.patch")], target)
             run([sys.executable, str(PATCHER.with_name("apply_mapping_fastpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_diff.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_texture_snapshot.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 for mode in ("0", "1"):
