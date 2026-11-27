@@ -64,7 +64,7 @@ impl<T> PinnedViews<T> {
     // A complete answer is possible only for the mappings in this mirror;
     // the caller must hold the external mapping guard. Never truncate.
     #[cfg(test)]
-    pub(super) fn aliases_for(&self, section: &Arc<T>, offset: usize, len: usize,
+    pub(crate) fn aliases_for(&self, section: &Arc<T>, offset: usize, len: usize,
                    scan_limit: usize, alias_limit: usize) -> Option<Vec<(usize, usize)>> {
         let end = offset.checked_add(len)?;
         if len == 0 { return Some(Vec::new()); }
@@ -85,7 +85,7 @@ impl<T> PinnedViews<T> {
     // Identity comparison, NOT a generation check or a data snapshot.
     // A mapping can change away and back; pending writes still matter.
     #[cfg(test)]
-    pub(super) fn matches_plan(&self, address: usize, len: usize, plan: &[PinnedSpan<T>]) -> bool {
+    pub(crate) fn matches_plan(&self, address: usize, len: usize, plan: &[PinnedSpan<T>]) -> bool {
         self.resolve(address, len).is_some_and(|current| {
             current.len() == plan.len() && current.iter().zip(plan).all(|(a, b)|
                 Arc::ptr_eq(&a.section, &b.section) && a.offset == b.offset && a.len == b.len)
