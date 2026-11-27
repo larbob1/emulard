@@ -183,6 +183,126 @@ impl<T> Flight<T> {
     }
 }
 
+/// Stable backing identity in the model. Actual resolution belongs to
+/// the mapping/lease owner; this is not a virtual address or slot number.
+#[derive(Clone)]
+pub struct Backing(Arc<()>);
+impl Backing {
+    pub fn new() -> Self { Self(Arc::new(())) }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MarkError { UnknownFootprint, WrongBacking, OutsideRegion, InvalidSpan, Invalidated, Capacity }
+
+/// Serial reference marker for one already-resolved backing byte region.
+/// No real alias projection, GPU atomic instructions or GPU synchronization.
+pub struct Marker {
+    ticket: Ticket,
+    fence: u64,
+    backing: Backing,
+    region: Span,
+    words: Vec<u64>,
+    invalid: bool,
+}
+
+fn page_bounds(region: Span, start: u64, len: u64) -> Result<(u64, u64), MarkError> {
+    let span = Span::new(start, len).ok_or(MarkError::InvalidSpan)?;
+    if span.start < region.start || span.end > region.end {
+        return Err(MarkError::OutsideRegion);
+    }
+    let origin = region.start / PAGE;
+    Ok((span.start / PAGE - origin, (span.end - 1) / PAGE - origin))
+}
+
+fn mark_bits(words: &mut [u64], first: u64, last: u64) {
+    // Inclusive page indices. Never shift by 64; final word is clipped by
+    // the previously validated byte span. Overlapping writes only OR bits.
+    let a = (first / 64) as usize;
+    let b = (last / 64) as usize;
+    let low = u64::MAX << (first % 64);
+    let high = u64::MAX >> (63 - last % 64);
+    if a == b {
+        words[a] |= low & high;
+    } else {
+        words[a] |= low;
+        for word in &mut words[a+1..b] { *word = u64::MAX; }
+        words[b] |= high;
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Observation {
+    pub candidate_pages: u64,
+    pub changed_pages: u64,
+    pub missed_pages: u64,
+    pub extra_pages: u64,
+}
+
+/// Independent exact completed-scan spans, NOT a second rendering path.
+/// None means missing/ineligible evidence, not zero changed bytes.
+impl Marker {
+    pub fn new<T>(flight: &Flight<T>, backing: Backing) -> Result<Self, MarkError> {
+        let pages = flight.region.pages();
+        if pages > MAX_PAGES { return Err(MarkError::Capacity); }
+        Ok(Self {
+            ticket: flight.ticket(), fence: flight.fence, backing,
+            region: flight.region, words: vec![0; pages.div_ceil(64) as usize], invalid: false,
+        })
+    }
+
+    pub fn unknown(&mut self) -> MarkError {
+        self.invalid = true;
+        MarkError::UnknownFootprint
+    }
+
+    pub fn mark(&mut self, backing: &Backing, start: u64, len: u64) -> Result<(), MarkError> {
+        if self.invalid { return Err(MarkError::Invalidated); }
+        let result = if !Arc::ptr_eq(&self.backing.0, &backing.0) {
+            Err(MarkError::WrongBacking)
+        } else {
+            page_bounds(self.region, start, len)
+        };
+        match result {
+            Ok((first, last)) => { mark_bits(&mut self.words, first, last); Ok(()) }
+            Err(e) => { self.invalid = true; Err(e) }
+        }
+    }
+
+    /// Consume the marker. No way to reset a fault into an empty valid mask.
+    /// Coverage assertions are supplied independently, not inferred here.
+    pub fn finish(self, coverage: Coverage) -> Option<Report> {
+        if self.invalid || !coverage.complete() { return None; }
+        Some(Report { ticket: self.ticket, fence: self.fence, coverage, words: self.words })
+    }
+
+    /// Observation only. Requires a verified same-domain completed fence,
+    /// same flight, full independently completed authoritative scan of
+    /// this exact backing region, and complete coverage assertions.
+    pub fn observe<T>(
+        &self, flight: &Flight<T>, domain: &FenceDomain, completed: u64,
+        backing: &Backing, coverage: Coverage, actual: Option<&[Span]>,
+    ) -> Option<Observation> {
+        if self.invalid || !coverage.complete() || !self.ticket.matches(&flight.ticket)
+            || self.fence != flight.fence || !flight.domain.matches(domain)
+            || completed < self.fence || completed == u64::MAX
+            || !Arc::ptr_eq(&self.backing.0, &backing.0)
+        { return None; }
+        let mut changed = vec![0u64; self.words.len()];
+        for span in actual? {
+            let (a, b) = page_bounds(self.region, span.start, span.end.checked_sub(span.start)?).ok()?;
+            mark_bits(&mut changed, a, b);
+        }
+        let mut out = Observation { candidate_pages: 0, changed_pages: 0, missed_pages: 0, extra_pages: 0 };
+        for (&candidate, &actual) in self.words.iter().zip(&changed) {
+            out.candidate_pages += candidate.count_ones() as u64;
+            out.changed_pages += actual.count_ones() as u64;
+            out.missed_pages += (actual & !candidate).count_ones() as u64;
+            out.extra_pages += (candidate & !actual).count_ones() as u64;
+        }
+        Some(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +532,130 @@ mod tests {
         drop(b.retire().unwrap());
         assert!(weak.upgrade().is_none());
     }
+    #[test]
+    fn marker_crosses_page_and_word_boundaries() {
+        let mut f = flight(17, PAGE * 130 - 34);
+        let backing = Backing::new();
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        m.mark(&backing, PAGE * 64 - 1, 2).unwrap();
+        m.mark(&backing, PAGE * 64, PAGE + 1).unwrap();
+        m.mark(&backing, PAGE * 64, 1).unwrap();
+        m.mark(&backing, 17, 1).unwrap();
+        m.mark(&backing, PAGE * 130 - 18, 1).unwrap();
+        let r = m.finish(coverage()).unwrap();
+        assert_eq!(r.words, vec![1 | (1 << 63), 3, 2]);
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Sparse(vec![
+            Span::new(17, PAGE - 17).unwrap(),
+            Span::new(PAGE * 63, PAGE * 3).unwrap(),
+            Span::new(PAGE * 129, PAGE - 17).unwrap(),
+        ])));
+    }
+
+    #[test]
+    fn marker_unknown_or_invalid_span_is_sticky() {
+        let f = flight(17, PAGE * 2);
+        let backing = Backing::new();
+        for (start, len, error) in [
+            (16, 1, MarkError::OutsideRegion),
+            (PAGE * 2 + 16, 2, MarkError::OutsideRegion),
+            (17, 0, MarkError::InvalidSpan),
+            (u64::MAX, 1, MarkError::InvalidSpan),
+        ] {
+            let mut m = Marker::new(&f, backing.clone()).unwrap();
+            m.mark(&backing, 17, 1).unwrap();
+            assert_eq!(m.mark(&backing, start, len), Err(error));
+            assert_eq!(m.mark(&backing, 17, 1), Err(MarkError::Invalidated));
+            assert!(m.finish(coverage()).is_none());
+        }
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        assert_eq!(m.unknown(), MarkError::UnknownFootprint);
+        assert!(m.finish(coverage()).is_none());
+    }
+
+    #[test]
+    fn marker_wrong_identity_and_unproven_coverage_fail_closed() {
+        let mut f = flight(0, PAGE);
+        let backing = Backing::new();
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        assert_eq!(m.mark(&Backing::new(), 0, 1), Err(MarkError::WrongBacking));
+        let r = m.finish(coverage());
+        assert_eq!(plan(&mut f, 7, r.as_ref()), Ok(&Plan::Authoritative));
+        let f = flight(0, PAGE);
+        let m = Marker::new(&f, backing.clone()).unwrap();
+        let mut c = coverage();
+        c.alias_footprint = false;
+        assert!(m.finish(c).is_none());
+        assert!(matches!(Marker::new(&flight(0, (MAX_PAGES+1)*PAGE), backing), Err(MarkError::Capacity)));
+    }
+
+    #[test]
+    fn marker_near_maximum_address_without_overflow() {
+        let mut f = flight(u64::MAX - PAGE, PAGE);
+        let backing = Backing::new();
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        m.mark(&backing, u64::MAX - PAGE, PAGE).unwrap();
+        let r = m.finish(coverage()).unwrap();
+        assert_eq!(plan(&mut f, 7, Some(&r)), Ok(&Plan::Sparse(vec![Span::new(u64::MAX-PAGE, PAGE).unwrap()])));
+    }
+
+    #[test]
+    fn observation_distinguishes_misses_and_false_positives() {
+        let f = flight(0, PAGE * 5);
+        let backing = Backing::new();
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        m.mark(&backing, 0, PAGE * 2).unwrap();
+        m.mark(&backing, PAGE * 4, 1).unwrap();
+        let actual = [Span::new(PAGE - 1, 2).unwrap(), Span::new(PAGE * 2, 1).unwrap()];
+        assert_eq!(m.observe(&f, &f.domain, 7, &backing, coverage(), Some(&actual)),
+            Some(Observation { candidate_pages: 3, changed_pages: 3, missed_pages: 1, extra_pages: 1 }));
+        assert_eq!(m.observe(&f, &f.domain, 7, &backing, coverage(), Some(&[])),
+            Some(Observation { candidate_pages: 3, changed_pages: 0, missed_pages: 0, extra_pages: 3 }));
+    }
+
+    #[test]
+    fn observation_rejects_missing_evidence_and_unrelated_completion() {
+        let f = flight(0, PAGE);
+        let other = flight(0, PAGE);
+        let backing = Backing::new();
+        let mut m = Marker::new(&f, backing.clone()).unwrap();
+        for value in [6, u64::MAX] {
+            assert!(m.observe(&f, &f.domain, value, &backing, coverage(), Some(&[])).is_none());
+        }
+        assert!(m.observe(&f, &f.domain, 7, &backing, coverage(), None).is_none());
+        assert!(m.observe(&f, &other.domain, 7, &backing, coverage(), Some(&[])).is_none());
+        assert!(m.observe(&other, &other.domain, 7, &backing, coverage(), Some(&[])).is_none());
+        assert!(m.observe(&f, &f.domain, 7, &Backing::new(), coverage(), Some(&[])).is_none());
+        assert!(m.observe(&f, &f.domain, 7, &backing, coverage(), Some(&[Span::new(PAGE, 1).unwrap()])).is_none());
+        m.unknown();
+        assert!(m.observe(&f, &f.domain, 7, &backing, coverage(), Some(&[])).is_none());
+    }
+
+    #[test]
+    fn marker_random_byte_oracle_matches_all_pages() {
+        let mut seed = 0x8123_4465_9876_u64;
+        let mut next = || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
+        for pages in [1, 2, 63, 64, 65, 129, 4096] {
+            let f = flight(17, pages * PAGE - 34);
+            let backing = Backing::new();
+            let mut m = Marker::new(&f, backing.clone()).unwrap();
+            let mut expected = vec![false; pages as usize];
+            for _ in 0..100 {
+                let start = 17 + next() % (f.region.end - 17);
+                let len = (1 + next() % (PAGE * 5)).min(f.region.end - start);
+                m.mark(&backing, start, len).unwrap();
+                // Independent per-page intersection oracle, not mark_bits.
+                for (i, bit) in expected.iter_mut().enumerate() {
+                    let lo = i as u64 * PAGE;
+                    *bit |= lo < start + len && start < lo + PAGE;
+                }
+            }
+            let r = m.finish(coverage()).unwrap();
+            for (i, want) in expected.into_iter().enumerate() {
+                assert_eq!((r.words[i/64] >> (i%64)) & 1 != 0, want);
+            }
+        }
+    }
+
     #[test]
     fn deterministic_page_oracle_across_word_boundaries() {
         let mut seed = 0x714b_217c_8a93_u64;

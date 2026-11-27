@@ -66,3 +66,31 @@ clipping, zero/full masks, incomplete fence and device loss, stale
 ticket/fence, every coverage category, malformed/oversized masks,
 publication failure, wrong fence domain, required readback/signal acknowledgements and independent retained leases, plus randomized
 page oracle across bitmap word boundaries. New cases reject duplicate/out-of-order effects, retry proven no-effect failures without replaying successful stages, quarantine uncertain outcomes at every stage, and quarantine unwinding effects. CPU-only, no hardware tests.
+
+## Checked marker and observation-only oracle
+
+The serial marker accepts already-resolved backing byte coordinates, using
+an opaque identity rather than virtual addresses or descriptor slots. It
+checks the entire nonempty span before OR-ing inclusive page bits, with
+bounded capacity and word-boundary handling. Invalid spans, overflow,
+unknown footprints or wrong backing permanently invalidate that marker.
+Finish consumes the marker and requires independently established complete
+coverage. A missing report takes the existing authoritative path.
+
+Observation requires the same flight, backing and completed fence domain,
+plus independently provided full completed baseline changed spans in the
+same region. It counts candidate, changed, missed and extra pages without
+changing either rendering or copy-back. Missing evidence is not an empty
+scan. False negatives must disqualify sparse eligibility in any future
+runtime integration; this observation-only model does not enforce a
+production acceptance policy or change Flight::plan. A zero miss count is
+not proof of all writer coverage. Both paths use synthetic backing identities;
+actual alias projection, complete mutation spans and retention belong to
+AI1's P10/P12 work. Different aliases must first resolve to the same stable
+backing coordinates. No production alias projection or GPU atomic marking
+is implemented. The actual prepared runtime remains unchanged.
+
+Seven additional regression cases (22 total) cover word/page crossings,
+invalid/unknown spans, identity/coverage/capacity, high-address clipping,
+false negatives and false positives, missing/unrelated scan evidence, and
+a deterministic page-intersection oracle. No actual transfer reduction.
