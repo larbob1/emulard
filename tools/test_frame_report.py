@@ -169,6 +169,17 @@ class FrameReportTests(unittest.TestCase):
         malformed = summarize([one.replace("1 frames", "2 frames"), u1])["critical_path_evidence"]
         self.assertEqual(malformed["represented_usual_frames"], 0)
 
+    def test_duplicate_and_inconsistent_detail_records(self):
+        batch = "frame times: 3 frames in 0.5 s: shortest 20 ms, median 150, longest 330; 2 long (over 100 ms, the usual frame of the last 64 being 20); each: 20 150 330"
+        u = "usual frame (the mean of 1 not long): 20 ms | disk: 1 reads 4.0 MB 30.0 worker ms"
+        long = "long frame 2 at 1.0 s: 150 ms | disk: 1 reads 8.0 MB 60.0 worker ms"
+        e = summarize([batch, u.replace("1 not long", "2 not long"), u, u,
+                       long, long, long.replace("frame 2", "frame 3"),
+                       long.replace("frame 2", "frame 4")])["critical_path_evidence"]
+        self.assertEqual(e["represented_usual_frames"], 1)
+        self.assertEqual(e["listed_long_frame_records"], 2)
+        self.assertEqual(e["rejected_detail_records"], 4)
+
     def test_hotpath_counters(self):
         result = summarize(["mapping diff run totals runs=4 pages=16", "texture view estimate hits hits=8"])
         self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)

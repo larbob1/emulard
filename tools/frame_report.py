@@ -46,7 +46,7 @@ def stats(rows):
             if (values := [row[key] for row in rows if key in row])}
 
 
-LONG_FRAME = re.compile(rf"\blong frame [0-9]+ at {NUMBER} s: (?P<ms>{NUMBER}) ms \|")
+LONG_FRAME = re.compile(rf"\blong frame (?P<frame_number>[0-9]+) at {NUMBER} s: (?P<ms>{NUMBER}) ms \|")
 OMITTED_LONG = re.compile(r"\blong frames: (?P<count>[0-9]+) more in this reading are not listed")
 
 # The upstream framelog emits every rounded frame duration in a batch.
@@ -121,7 +121,7 @@ def detail_stats(rows, usual=False):
     return result
 
 
-def critical_evidence(usual, long, expected_usual, expected_long, unanchored):
+def critical_evidence(usual, long, expected_usual, expected_long, unanchored, rejected):
     return {
         "critical_path_status": "not attributable from aggregate counters",
         "expected_usual_frames": expected_usual,
@@ -129,6 +129,7 @@ def critical_evidence(usual, long, expected_usual, expected_long, unanchored):
         "expected_long_frames_in_batches": expected_long,
         "listed_long_frame_records": len(long),
         "unanchored_detail_records": unanchored,
+        "rejected_detail_records": rejected,
         "usual_frame_cohort_means": detail_stats(usual, usual=True),
         "selected_long_frames": detail_stats(long),
         "note": "Present subfields are nested; presenting-thread CPU, calls, pacing, worker and process totals can overlap. GPU list timings arrive later and cannot be assigned to this frame. Storage worker ms are aggregate service time, not wall time or queue latency. Usual cohorts are weighted by their represented frame count; long frames are selected and may be omitted. No totals, exclusive percentages, or bottleneck ranking are inferred. Missing fields have no metric.",
@@ -178,7 +179,9 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
     detail_active = False
     detail_header_seen = False
     usual_details, long_details = [], []
-    expected_usual = expected_long = unanchored = 0
+    expected_usual = expected_long = unanchored = rejected = 0
+    usual_remaining = long_remaining = 0
+    seen_long_numbers = set()
     for line in lines:
         update_counters(cumulative, line)
         if "frame times:" in line:
@@ -195,14 +198,28 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
                     long_count = int(FRAME_BATCH.search(line)["long_count"])
                     expected_long += long_count
                     expected_usual += len(batch) - long_count
+                    usual_remaining = len(batch) - long_count
+                    long_remaining = min(long_count, 8)  # pinned LONG_MOST
+                    seen_long_numbers.clear()
         usual_match = USUAL_FRAME.search(line)
         long_match = LONG_FRAME.search(line)
         if usual_match or long_match:
             if detail_active:
-                if usual_match and int(usual_match["count"]) > 0:
-                    usual_details.append((int(usual_match["count"]), detail_values(line)))
+                if usual_match:
+                    count = int(usual_match["count"])
+                    if count == usual_remaining and count > 0:
+                        usual_details.append((count, detail_values(line)))
+                        usual_remaining = 0
+                    else:
+                        rejected += 1
                 elif long_match:
-                    long_details.append((1, detail_values(line)))
+                    number = int(long_match["frame_number"])
+                    if long_remaining > 0 and number not in seen_long_numbers:
+                        long_details.append((1, detail_values(line)))
+                        seen_long_numbers.add(number)
+                        long_remaining -= 1
+                    else:
+                        rejected += 1
             elif not detail_header_seen:
                 unanchored += 1
         if seen >= skip:
@@ -243,7 +260,7 @@ def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
         "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
     detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
-                "critical_path_evidence": critical_evidence(usual_details, long_details, expected_usual, expected_long, unanchored),
+                "critical_path_evidence": critical_evidence(usual_details, long_details, expected_usual, expected_long, unanchored, rejected),
                 "interval_sample_quality": {"seen": seen, "skipped": skipped_intervals,
                     "invalid_after_warmup": invalid_intervals, "used": len(rows)},
                 "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
