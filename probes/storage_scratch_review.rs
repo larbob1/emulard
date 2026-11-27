@@ -361,7 +361,13 @@ fn allocator_calls_mixed_size_and_trim_review() {
     let mut input = vec![0u8; MAX];
     let mut a = vec![0xA5; MAX + 8];
     let mut b = a.clone();
-    for (label, cap) in [("disabled", 0usize), ("bounded", LIMIT)] {
+    // Retain the historical disabled/64KiB rows first, then sweep other
+    // illustrative limits. Each mode uses a fresh slot and identical work.
+    for (label, cap) in [
+        ("disabled", 0usize), ("bounded", LIMIT),
+        ("cap4k", 4096), ("cap8k", 8192), ("cap16k", 16384),
+        ("cap32k", 32768), ("cap128k", 131072),
+    ] {
         let mut slot = Scratch::new(cap);
         let mut original = MixedTotals::default();
         let mut reuse = MixedTotals::default();
@@ -437,8 +443,13 @@ fn allocator_calls_mixed_size_and_trim_review() {
             assert_eq!(reuse.calls.acquisitions(), nonzero);
             assert_eq!(reuse.peak_idle, 0);
         } else {
-            assert!(reuse.hits > 0);
-            assert!(reuse.calls.acquisitions() < original.calls.acquisitions());
+            // A larger cap is not assumed to improve results monotonically.
+            // Verify the historical 64KiB benefit, but retain every sweep
+            // result, including any cap with no improvement.
+            if cap == LIMIT {
+                assert!(reuse.hits > 0);
+                assert!(reuse.calls.acquisitions() < original.calls.acquisitions());
+            }
         }
         println!("Storage scratch mixed calls: mode={} cap={} requests={} failed={} nonzero={} input_bytes={} baseline_acquisitions={} baseline_requested={} reuse_acquisitions={} reuse_realloc={} reuse_requested={} reuse_dealloc={} hits={} trim_events={} peak_idle={} final_idle={}",
             label, cap, reuse.reads, reuse.failed, nonzero, total_bytes,

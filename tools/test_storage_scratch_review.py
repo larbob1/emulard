@@ -33,11 +33,26 @@ class StorageScratchReviewTests(unittest.TestCase):
             mixed = [line[line.index("Storage scratch mixed calls:"):]
                      for line in result.stdout.splitlines()
                      if "Storage scratch mixed calls:" in line]
-            self.assertEqual(len(mixed), 2, result.stdout)
-            for mode, line in zip(("disabled", "bounded"), mixed):
-                self.assertIn("mode=" + mode + " ", line)
-                self.assertIn("requests=128 failed=16 ", line)
-                self.assertTrue(line.endswith("final_idle=0"), line)
+            modes = (("disabled", 0), ("bounded", 65536), ("cap4k", 4096),
+                     ("cap8k", 8192), ("cap16k", 16384), ("cap32k", 32768),
+                     ("cap128k", 131072))
+            self.assertEqual(len(mixed), len(modes), result.stdout)
+            for (mode, cap), line in zip(modes, mixed):
+                fields = dict(field.split("=", 1) for field in
+                              line.removeprefix("Storage scratch mixed calls: ").split())
+                self.assertEqual(fields["mode"], mode)
+                self.assertEqual(int(fields["cap"]), cap)
+                self.assertEqual(int(fields["requests"]), 128)
+                self.assertEqual(int(fields["failed"]), 16)
+                self.assertEqual(int(fields["nonzero"]), 120)
+                self.assertEqual(int(fields["input_bytes"]), 2458368)
+                self.assertEqual(int(fields["baseline_acquisitions"]), 120)
+                self.assertEqual(int(fields["baseline_requested"]), 2458368)
+                self.assertEqual(int(fields["trim_events"]), 9)
+                self.assertEqual(int(fields["final_idle"]), 0)
+                self.assertLessEqual(int(fields["peak_idle"]), cap)
+                self.assertEqual(int(fields["reuse_acquisitions"]),
+                                 int(fields["reuse_realloc"]) + int(fields["reuse_dealloc"]))
                 print(line, flush=True)
             print("Storage scratch Vec review: 9 passed; 0 failed; 0 ignored", flush=True)
 
