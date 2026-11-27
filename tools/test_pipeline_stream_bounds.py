@@ -48,6 +48,11 @@ const PIPELINE_IIDS: [Iid; 1] = [0];
 
 #[repr(C)]
 struct Bytecode { code: *const u8, size: usize }
+#[repr(C)]
+struct GraphicsHead { root: This, stages: [Bytecode; 5] }
+#[repr(C)]
+struct ComputeHead { root: This, stage: Bytecode }
+const GRAPHICS_STAGES: [&str; 5] = ["vertex", "pixel", "domain", "hull", "geometry"];
 type Shader = (&'static str, Vec<u8>);
 fn copy(stage: &'static str, code: &Bytecode) -> Option<Shader> {
     if code.code.is_null() || code.size == 0 { return None; }
@@ -89,18 +94,22 @@ class PipelineStreamBoundsTests(unittest.TestCase):
         images = postimages()
         parser, = [s for s in images if "fn create_stream(" in s]
         fixture, = [s for s in images if "fn stream_result(" in s]
+        plain, = [s for s in images if "fn bytecode_extent_valid(" in s]
+        # Compile the exact validator and creator functions, with hand_out/copy stubs.
+        validator = plain.split("/// The stage's container", 1)[0]
+        creators = plain[plain.index("/// Device method.\npub(crate) extern \"system\" fn create_graphics("):]
         fixture = fixture.split("    /// The stream layout", 1)[0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "stream.rs"
             binary = root / "stream-tests.exe"
-            source.write_text(STUBS + parser + "\n#[cfg(test)] mod tests { use super::*;\n"
+            source.write_text(STUBS + validator + creators + parser + "\n#[cfg(test)] mod tests { use super::*;\n"
                               + fixture + "\n}\n", encoding="utf-8")
             subprocess.run(["rustc", "--edition=2021", "--test", str(source), "-o", str(binary)],
                            check=True, capture_output=True, text=True)
             result = subprocess.run([str(binary), "pipeline_stream_"], check=True,
                                     capture_output=True, text=True)
-            self.assertIn("5 passed; 0 failed", result.stdout)
+            self.assertIn("8 passed; 0 failed", result.stdout)
 
 if __name__ == "__main__":
     unittest.main()
