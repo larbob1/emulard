@@ -84,6 +84,8 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
     suite("victory-gpu", "mapping_tests")
+    suite("victory-gpu", "reverse_alias_index_preserves_other_views")
+    suite("victory-hle", "reverse_alias_index_churn_preserves_backing")
     suite("victory-gpu", "perf_hotpath_coverage_tests")
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF_RUNS="1")
     suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
@@ -157,6 +159,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_preflight.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_alias_index.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
