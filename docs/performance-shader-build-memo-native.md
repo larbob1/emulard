@@ -1,0 +1,3 @@
+# P17/P22/P24 isolated memo correctness gate
+
+Exact parent 67b1ae2f7f53a90ca05330ee9b4b9a89512ee1f4, exact build memo tuple and extracted test from AI2 a0f8cf5df1970ec398e549fb643d2eb82c7d61f0; pinned upstream 51700c6. No unrelated timing tuples imported. Default-off memo still re-reads dynamic fingerprint and matches full executable/fingerprint bytes. Normal two tests and fresh actual build/TLS tests with explicit modes 0/1, normal key, translated reuse off. Historical cache reuse/parity/publication rerun and both builds retained because embedded source changes key namespace. No timing or compiler/driver/gameplay proof. Native result outstanding.
