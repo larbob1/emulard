@@ -48,7 +48,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-combined-playtest' || github.head_ref == 'dev/performance-phase6-combined-playtest' || github.ref == 'refs/heads/dev/performance-phase6-mapping-diagnostic-native' || github.head_ref == 'dev/performance-phase6-mapping-diagnostic-native'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-combined-playtest' || github.head_ref == 'dev/performance-phase6-combined-playtest' || github.ref == 'refs/heads/dev/performance-phase6-mapping-diagnostic-native' || github.head_ref == 'dev/performance-phase6-mapping-diagnostic-native' || github.ref == 'refs/heads/dev/performance-phase6-mapping-index-native' || github.head_ref == 'dev/performance-phase6-mapping-index-native'
     steps:
       - uses: actions/checkout@v4
         with:
