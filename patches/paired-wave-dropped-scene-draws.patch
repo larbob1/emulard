@@ -194,7 +194,7 @@
      create_compute(this, desc, iid, out)
  }
  
-@@ -674,87 +700,102 @@
+@@ -674,87 +700,104 @@
  /// A pipeline described as a stream: its size and the subobjects, each a
  /// type then its data, padded to 8 bytes.
  #[repr(C)]
@@ -289,9 +289,14 @@
          }
          #[cfg(windows)]
          // SAFETY: a whole subobject of this kind lies at `at`.
-         unsafe {
-             graphics.read(kind, desc.stream.add(at))
-         };
+-        unsafe {
+-            graphics.read(kind, desc.stream.add(at))
+-        };
++        if !unsafe {
++            graphics.read(kind, desc.stream.add(at))
++        } {
++            return E_INVALIDARG;
++        }
          at += size;
      }
      hand_out(
@@ -303,7 +308,38 @@
      )
  }
  
-@@ -885,6 +926,116 @@
+@@ -885,6 +928,147 @@
++    #[cfg(windows)]
++    #[test]
++    fn pipeline_stream_rejects_invalid_nested_input_layout() {
++        use windows::Win32::Graphics::Direct3D12::D3D12_INPUT_ELEMENT_DESC;
++        let align = std::mem::align_of::<D3D12_INPUT_ELEMENT_DESC>();
++        let bad_name = D3D12_INPUT_ELEMENT_DESC::default();
++        let good = D3D12_INPUT_ELEMENT_DESC {
++            SemanticName: windows::core::PCSTR(b"POSITION\0".as_ptr()),
++            ..Default::default()
++        };
++        let mut bytes = [0u8; 24];
++        bytes[..4].copy_from_slice(&12u32.to_le_bytes());
++        for (ptr, count) in [
++            (0usize, 1u32), (1, 1),
++            (usize::MAX & !(align - 1), 2),
++            (&raw const bad_name as usize, 1),
++        ] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..20].copy_from_slice(&count.to_le_bytes());
++            assert_eq!(stream_result(&bytes, 24), (E_INVALIDARG, std::ptr::null()));
++        }
++        for (ptr, count) in [(0usize, 0u32), (&raw const good as usize, 1)] {
++            bytes[8..16].copy_from_slice(&(ptr as u64).to_le_bytes());
++            bytes[16..20].copy_from_slice(&count.to_le_bytes());
++            let (hr, p) = stream_result(&bytes, 24);
++            assert_eq!(hr, S_OK);
++            assert!(!p.is_null());
++            assert_eq!(release(p), 0);
++        }
++    }
++
 +    #[test]
 +    fn pipeline_stream_rejects_invalid_shader_extent() {
 +        let mut bytes = [0u8; 24];
@@ -420,3 +456,198 @@
      /// topology, render target and depth formats: 0x2b0 bytes.
      #[test]
      fn streams_yield_their_shaders() {
+--- a/crates/victory-gpu/src/pipeline/host.rs
++++ b/crates/victory-gpu/src/pipeline/host.rs
+@@ -92,85 +92,107 @@
+-}
+-
+-impl GraphicsState {
+-    /// Takes in one subobject of a stream: its type, then its data at +4
+-    /// (+8 for those holding pointers).
+-    ///
+-    /// # Safety
+-    /// `at` points at a whole subobject of type `kind`.
+-    pub(crate) unsafe fn read(&mut self, kind: u32, at: *const u8) {
+-        // SAFETY: the caller passes a whole subobject.
+-        unsafe {
+-            let data = at.add(4);
+-            match kind {
+-                8 => self.blend = data.cast::<D3D12_BLEND_DESC>().read_unaligned(),
+-                9 => self.sample_mask = data.cast::<u32>().read_unaligned(),
+-                10 => self.rasterizer = data.cast::<D3D12_RASTERIZER_DESC>().read_unaligned(),
+-                11 => {
+-                    self.depth = data.cast::<D3D12_DEPTH_STENCIL_DESC>().read_unaligned();
+-                    self.depth_bounds = false;
+-                }
+-                21 => {
+-                    let d = data.cast::<D3D12_DEPTH_STENCIL_DESC1>().read_unaligned();
+-                    self.depth_bounds = d.DepthBoundsTestEnable.as_bool();
+-                    self.depth = D3D12_DEPTH_STENCIL_DESC {
+-                        DepthEnable: d.DepthEnable,
+-                        DepthWriteMask: d.DepthWriteMask,
+-                        DepthFunc: d.DepthFunc,
+-                        StencilEnable: d.StencilEnable,
+-                        StencilReadMask: d.StencilReadMask,
+-                        StencilWriteMask: d.StencilWriteMask,
+-                        FrontFace: d.FrontFace,
+-                        BackFace: d.BackFace,
+-                    };
+-                }
+-                12 => {
+-                    let layout = at.add(8).cast::<D3D12_INPUT_LAYOUT_DESC>().read_unaligned();
+-                    if layout.pInputElementDescs.is_null() {
+-                        return;
+-                    }
+-                    let elements = std::slice::from_raw_parts(
+-                        layout.pInputElementDescs,
+-                        layout.NumElements as usize,
+-                    );
+-                    self.names = elements
+-                        .iter()
+-                        .map(|e| CStr::from_ptr(e.SemanticName.0.cast()).to_owned())
+-                        .collect();
+-                    self.inputs = elements
+-                        .iter()
+-                        .zip(&self.names)
+-                        .map(|(e, name)| D3D12_INPUT_ELEMENT_DESC {
+-                            SemanticName: PCSTR(name.as_ptr().cast()),
+-                            Format: DXGI_FORMAT(
+-                                crate::resource::pc_format(e.Format.0 as u32) as i32
+-                            ),
+-                            ..*e
+-                        })
+-                        .collect();
+-                }
+-                13 => {
+-                    self.strip_cut =
+-                        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE(data.cast::<i32>().read_unaligned())
+-                }
+-                14 => {
+-                    self.topology =
+-                        D3D12_PRIMITIVE_TOPOLOGY_TYPE(data.cast::<i32>().read_unaligned())
+-                }
+-                15 => {
+-                    self.targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
+-                    for f in &mut self.targets.RTFormats {
+-                        f.0 = crate::resource::target_format(crate::resource::pc_format(
+-                            f.0 as u32,
+-                        )) as i32;
+-                    }
+-                }
+-                16 => {
+-                    let f = data.cast::<u32>().read_unaligned();
+-                    self.depth_format = DXGI_FORMAT(crate::resource::pc_format(f) as i32);
+-                }
+-                17 => self.samples = data.cast::<DXGI_SAMPLE_DESC>().read_unaligned(),
+-                _ => {}
+-            }
+-        }
+-    }
+-
++}
++
++// Arithmetic only; readable, live external storage is still an ABI obligation.
++fn input_layout_extent_valid<T>(ptr: *const T, count: usize) -> bool {
++    if count == 0 {
++        return true;
++    }
++    let start = ptr as usize;
++    !ptr.is_null() && start % std::mem::align_of::<T>() == 0
++        && count.checked_mul(std::mem::size_of::<T>()).is_some_and(|bytes|
++            bytes <= isize::MAX as usize && start.checked_add(bytes).is_some())
++}
++
++impl GraphicsState {
++    /// Takes in one subobject of a stream: its type, then its data at +4
++    /// (+8 for those holding pointers).
++    ///
++    /// # Safety
++    /// `at` points at a whole subobject of type `kind`; nonempty nested
++    /// arrays and names must reference live readable storage.
++    pub(crate) unsafe fn read(&mut self, kind: u32, at: *const u8) -> bool {
++        // SAFETY: the caller passes a whole subobject.
++        unsafe {
++            let data = at.add(4);
++            match kind {
++                8 => self.blend = data.cast::<D3D12_BLEND_DESC>().read_unaligned(),
++                9 => self.sample_mask = data.cast::<u32>().read_unaligned(),
++                10 => self.rasterizer = data.cast::<D3D12_RASTERIZER_DESC>().read_unaligned(),
++                11 => {
++                    self.depth = data.cast::<D3D12_DEPTH_STENCIL_DESC>().read_unaligned();
++                    self.depth_bounds = false;
++                }
++                21 => {
++                    let d = data.cast::<D3D12_DEPTH_STENCIL_DESC1>().read_unaligned();
++                    self.depth_bounds = d.DepthBoundsTestEnable.as_bool();
++                    self.depth = D3D12_DEPTH_STENCIL_DESC {
++                        DepthEnable: d.DepthEnable,
++                        DepthWriteMask: d.DepthWriteMask,
++                        DepthFunc: d.DepthFunc,
++                        StencilEnable: d.StencilEnable,
++                        StencilReadMask: d.StencilReadMask,
++                        StencilWriteMask: d.StencilWriteMask,
++                        FrontFace: d.FrontFace,
++                        BackFace: d.BackFace,
++                    };
++                }
++                12 => {
++                    let layout = at.add(8).cast::<D3D12_INPUT_LAYOUT_DESC>().read_unaligned();
++                    let count = layout.NumElements as usize;
++                    if !input_layout_extent_valid(layout.pInputElementDescs, count) {
++                        return false;
++                    }
++                    if count == 0 {
++                        // Preserve the existing null/empty layout behavior.
++                        if !layout.pInputElementDescs.is_null() {
++                            self.inputs.clear();
++                            self.names.clear();
++                        }
++                        return true;
++                    }
++                    let elements = std::slice::from_raw_parts(layout.pInputElementDescs, count);
++                    if elements.iter().any(|e| e.SemanticName.0.is_null()) {
++                        return false;
++                    }
++                    self.names = elements
++                        .iter()
++                        .map(|e| CStr::from_ptr(e.SemanticName.0.cast()).to_owned())
++                        .collect();
++                    self.inputs = elements
++                        .iter()
++                        .zip(&self.names)
++                        .map(|(e, name)| D3D12_INPUT_ELEMENT_DESC {
++                            SemanticName: PCSTR(name.as_ptr().cast()),
++                            Format: DXGI_FORMAT(
++                                crate::resource::pc_format(e.Format.0 as u32) as i32
++                            ),
++                            ..*e
++                        })
++                        .collect();
++                }
++                13 => {
++                    self.strip_cut =
++                        D3D12_INDEX_BUFFER_STRIP_CUT_VALUE(data.cast::<i32>().read_unaligned())
++                }
++                14 => {
++                    self.topology =
++                        D3D12_PRIMITIVE_TOPOLOGY_TYPE(data.cast::<i32>().read_unaligned())
++                }
++                15 => {
++                    self.targets = data.cast::<D3D12_RT_FORMAT_ARRAY>().read_unaligned();
++                    for f in &mut self.targets.RTFormats {
++                        f.0 = crate::resource::target_format(crate::resource::pc_format(
++                            f.0 as u32,
++                        )) as i32;
++                    }
++                }
++                16 => {
++                    let f = data.cast::<u32>().read_unaligned();
++                    self.depth_format = DXGI_FORMAT(crate::resource::pc_format(f) as i32);
++                }
++                17 => self.samples = data.cast::<DXGI_SAMPLE_DESC>().read_unaligned(),
++                _ => {}
++            }
++        }
++        true
++    }
++
