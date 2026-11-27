@@ -25,3 +25,6 @@ P04/P08/P10: candidate 49ca476, PR #10. Native test-only pinned read fixture com
 
 ## AI 1 coordinated handoff
 P07 PR #16 at 1f5cbf1; synthetic checks passed; native pending. P04/P10 pinned native read still pending; requested graphics agreement on GPU synchronization before production consumer work. Requested AI 3 report allowlist for scatter counters. AI 2 PR #14 and AI 3 PR #15 opened independently; coordinator review and owner merge approval outstanding. No cross-branch changes.
+
+## Coordinator combined-build handoff
+PR #18, dbac4c6, exact snapshots #9/#14/#15; see status for CI. Other branches continue independently; no merge approved. Next: review combined native result, compare individual switches on owner hardware, then review newer agent PRs. All 24 IDs open.
