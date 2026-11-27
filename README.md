@@ -13,11 +13,11 @@ Emulard builds on [VIctory](https://github.com/fxceless/victory-fork) and is wor
 | Windows | Experimental |
 | Linux (Wine/Proton) | Experimental |
 | Game graphics | Incomplete; compatibility varies |
-| Performance | Under active development |
+| Performance | Approximately 2–3 FPS in an early Proton gameplay test (reported by the project owner) |
 | 30 FPS gameplay | Goal, not yet verified |
 | One-click installer | Not available |
 
-Our first major goal is **30 FPS with correct graphics and responsive controls**. Early experiments have been much slower. Development progress does not necessarily mean a game is playable yet.
+Our first major goal is **30 FPS with correct graphics and responsive controls**. An early Proton gameplay test reached approximately 2–3 FPS. This is a reported result, not a standardized benchmark or a guarantee that other systems will work.
 
 ## Getting started
 

@@ -55,3 +55,17 @@ The newer reporting script does not change the external runtime binary. `approx_
 If there are not enough intervals, repeat with a smaller, identical warmup exclusion and report it. Review the numeric output before sharing it. Raw logs stay on your computer. Record whether the full world is visible, the game responds to controls, and there are crashes, drops or missing graphics. Note the tested commit and actual driver/Proton versions.
 
 A faster FPS counter with a black or incomplete scene is not a success. For formal 30 FPS acceptance, see the [roadmap](ROADMAP-30FPS.md). 
+
+## 4. Test the new mapping candidates (after combined validation)
+
+The owner reports Proton gameplay at 2–3 FPS. Keep that exact working executable and configuration as a reference; record its commit and flags if known. The isolated hot-path build at `2871877` passed [Windows CI](https://github.com/larbob1/emulard/actions/runs/45938587772). The cumulative integration at `c5db073` still needs its own validation. Use a separate build and the same diagnostic profile for comparisons. Keep every other optional experiment off, then test:
+
+| Comparison | Environment changes relative to the same binary's baseline |
+| --- | --- |
+| Range-diff | `VICTORY_MAP_DIFF=1` |
+| Changed contiguous runs | `VICTORY_MAP_DIFF=1 VICTORY_MAP_DIFF_RUNS=1` (compare with range-diff alone) |
+| Alias runs | `VICTORY_MAP_RUNS=1` |
+| Direct alias-run attempt | `VICTORY_MAP_RUNS=1 VICTORY_MAP_ALIAS_DIRECT=1` (compare with alias runs alone) |
+| Texture residency estimate | `VICTORY_TEXTURE_VIEW_ESTIMATE=1` |
+
+Record the `long_frame_remapping`, `alias_rates_per_second`, `individual_frame_times`, and `latest_cumulative_counters` sections from the numeric report, plus visible scene/control correctness. The new direct-run counter reports logical attempts/hits, not host calls. If an experiment makes gameplay worse or fails smoke checks, stop it and revert to the known-working configuration.

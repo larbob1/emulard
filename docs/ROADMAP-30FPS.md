@@ -2,7 +2,7 @@
 
 **Goal:** sustained, correctly rendered and responsive gameplay at 30 FPS on a reproducible reference configuration. This is an engineering target, not a forecast or a current claim.
 
-The reported 1–3 FPS corresponds to roughly 333–1,000 ms/frame. 30 FPS requires an average frame duration of about 33.3 ms: roughly a 10–30× improvement over that starting observation. Historical diagnostics suggest large host mapping stalls, but there is no current matched benchmark proving how much each component contributes to the critical path.
+The project owner now reports Proton gameplay at approximately 2–3 FPS (roughly 333–500 ms/frame). 30 FPS requires an average frame duration of about 33.3 ms: roughly a 10–15× improvement over that observation. The exact tested revision, settings and matched frame logs have not yet been recorded. Historical diagnostics suggest large host mapping stalls, but there is no current matched benchmark proving how much each component contributes to the critical path.
 
 The [canonical deferred-work register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md) retains IDs P01–P24 and detailed evidence. This main-branch roadmap is a prioritized planning view. No item is closed by appearing here; update the canonical register with evidence before closing it.
 
@@ -93,3 +93,7 @@ A possible starting budget for **non-overlapping critical-path** work is 8 ms CP
 At the time of writing, all 24 deferred IDs remain unresolved. Phase 6 synthetic CI passed 107 Python tests, 4 range-gate tests and 10 portable copy-helper executions at `8956a8e`. All 21 selected native Windows suite invocations and both runtime build profiles subsequently passed at `8956a8e` ([CI evidence](https://github.com/larbob1/emulard/actions/runs/45937702602)). Newer candidate validation, Proton execution and gameplay acceptance remain unverified. The authoritative [register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md) and [Actions](https://github.com/larbob1/emulard/actions) should be used for live evidence.
 
 Every completed task must identify the validating commit, test/benchmark command, outcome and remaining caveats. Keep unfinished tasks listed. If a prototype fails to improve performance or breaks correctness, revert or leave it disabled rather than promoting it.
+
+### Latest progress
+
+The owner reports Proton gameplay at 2–3 FPS. This establishes a practical initial launch/gameplay observation, not formal M1 visual acceptance or a repeatable performance gate. The isolated [mapping hot-path Windows workflow](https://github.com/larbob1/emulard/actions/runs/45938587772) passed all selected groups and both profiles at `2871877`. Those opt-in changes are integrated in cumulative commit `c5db073` alongside a new opt-in direct alias-run attempt. Combined runtime validation remains pending. Next: compare the same workload with each mapping switch independently and record actual frame times and remapping telemetry; full placeholder interval tracking, software GPU page tables, and range synchronization remain outstanding.
