@@ -31,6 +31,19 @@ class ClockPreflightTests(unittest.TestCase):
         self.assertIsNone(report(status, guard, 2, 1000)
                           ["status_read_spans_stop_dispatch_count"])
 
+    def test_truthy_nonboolean_is_not_origin_attestation(self):
+        status = [row(0, "status", start=10, end=100)]
+        guard = [row(0, "guard")]
+        guard[0].update(stop_before_relative_ns=40, stop_after_relative_ns=45)
+        for attestation in (1, "yes", "false", [True], False, None):
+            with self.subTest(attestation=attestation):
+                result = report(status, guard, 1, 1000, attestation)
+                self.assertFalse(result["shared_origin_operator_attested"])
+                self.assertIsNone(result["status_read_spans_stop_dispatch_count"])
+        result = report(status, guard, 1, 1000, True)
+        self.assertTrue(result["shared_origin_operator_attested"])
+        self.assertEqual(result["status_read_spans_stop_dispatch_count"], 1)
+
     def test_missing_sequence_and_partial_fields(self):
         result = report([row(0, "status"), row(2, "status")], [], 3, 1000)
         self.assertEqual(result["status"]["unobserved_sequence_slots"], 1)

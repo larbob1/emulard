@@ -125,7 +125,7 @@ def report(status_rows, guard_rows, expected, period_ns, shared_origin=False):
     clean = all(not stream["malformed_or_out_of_order_rows"] and not stream["cadence_errors"]
                 for stream in (status, guard))
     spanning = None
-    if shared_origin and stop is not None and clean:
+    if shared_origin is True and stop is not None and clean:
         spanning = sum(start < stop[0] and end > stop[1]
                        for start, end, _ in status_intervals)
     return {
