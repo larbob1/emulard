@@ -2,7 +2,7 @@ name: Paired-wave performance runtime validation
 
 on:
   push:
-    branches: ['dev/performance-phase6', 'dev/performance-phase6-combined-playtest']
+    branches: ['dev/performance-phase6', 'dev/performance-phase6-combined-playtest', 'dev/performance-phase6-detached-recording-native']
     paths-ignore:
       - 'docs/**'
       - 'README.md'
