@@ -83,6 +83,7 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
     suite("victory-gpu", "mapping_tests")
+    suite("victory-gpu", "reverse_alias_index_preserves_other_views")
     suite("victory-gpu", "perf4_tests")
     for enabled in ("0", "1"):
         env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
@@ -145,6 +146,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_disk_worker_perf.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_paired_tile_replay.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_checked_unmap.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_alias_index.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
