@@ -379,6 +379,15 @@ EXPECTED = json.loads(r'''[
 ]''')
 
 
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
 def canonical(row):
     if not isinstance(row, dict):
         raise ValueError("row is not an object")
@@ -416,6 +425,8 @@ def verify(rows):
                 raise ValueError("shared repository path")
             paths.add(f[0])
     return {
+        "snapshot_scope": "HISTORICAL_PR_62_TO_72_ONLY",
+        "current_inventory": "NOT_ESTABLISHED",
         "matched_proposals": len(seen),
         "distinct_repository_paths": len(paths),
         "added_lines": sum(f[2] for row in rows for f in row["files"]),
@@ -444,12 +455,13 @@ def main(argv=None):
     try:
         if a.snapshot.stat().st_size > 1024 * 1024:
             raise ValueError("snapshot exceeds size limit")
-        result = verify(json.loads(a.snapshot.read_text(encoding="utf-8")))
+        result = verify(json.loads(a.snapshot.read_text(encoding="utf-8"),
+                                   object_pairs_hook=reject_duplicate_keys))
     except (OSError, ValueError, TypeError):
         print("INVALID: snapshot is incomplete, changed, or malformed")
         return 1
     print(json.dumps(result, indent=2))
-    print("Frozen metadata match only; no approval or live authenticity proof.")
+    print("Historical PR #62–#72 metadata match only; not current inventory, approval or live authenticity proof.")
     return 0
 
 
