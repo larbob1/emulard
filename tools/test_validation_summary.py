@@ -20,5 +20,25 @@ class ValidationSummaryTests(unittest.TestCase):
             "passed: release build",
         ])
 
+    def test_counts_only_for_matching_successful_suite(self):
+        lines = [
+            b"Running runtime test: victory-gpu cpu_trace\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation passed: victory-gpu cpu_trace\n",
+            b"Running runtime test: victory-gpu window_tests\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation passed: victory-gpu window_tests\n",
+            b"Running runtime test: victory-gpu cpu_trace\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation failed: victory-gpu cpu_trace\n",
+            b"Runtime validation passed: diagnostics build\n",
+        ]
+        self.assertEqual(validation_summary(lines), [
+            "passed: victory-gpu cpu_trace [passed=30 failed=0]",
+            "passed: victory-gpu window_tests",
+            "failed: victory-gpu cpu_trace",
+            "passed: diagnostics build",
+        ])
+
 if __name__ == "__main__":
     unittest.main()
