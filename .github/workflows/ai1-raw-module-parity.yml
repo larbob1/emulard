@@ -1,0 +1,75 @@
+name: AI1 isolated raw-module parity
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - '.github/workflows/ai1-raw-module-parity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  raw-module-parity:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-raw-module-parity'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact reviewed runner
+        uses: actions/checkout@v4
+        with:
+          ref: c03939cb30986cb1dfe9b4cd13073e46802ea346
+          path: runner
+          persist-credentials: false
+      - name: Check out exact PR64
+        uses: actions/checkout@v4
+        with:
+          ref: 1b118a210d02d19686a9389fc30ea723c670bec4
+          path: pr64
+          persist-credentials: false
+      - name: Check out exact PR65
+        uses: actions/checkout@v4
+        with:
+          ref: 5af0fa2cbadf311947f0101eefad18b16bcc2f9a
+          path: pr65
+          persist-credentials: false
+      - name: Check out exact PR66
+        uses: actions/checkout@v4
+        with:
+          ref: 3b22fabc99cef39f20b87abe67e8e4e1a9c0e6c1
+          path: pr66
+          persist-credentials: false
+      - name: Check out exact upstream public source
+        uses: actions/checkout@v4
+        with:
+          repository: fxceless/victory-fork
+          ref: 51700c6d43a3507fa65e50fe4bb64074ce706cd4
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact checkout and runner identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          verify() {
+            test "$(git -C "$1" rev-parse HEAD)" = "$2"
+            test -z "$(git -C "$1" status --porcelain)"
+            printf '%s checkout=%s\n' "$1" "$2"
+          }
+          verify runner c03939cb30986cb1dfe9b4cd13073e46802ea346
+          verify pr64 1b118a210d02d19686a9389fc30ea723c670bec4
+          verify pr65 5af0fa2cbadf311947f0101eefad18b16bcc2f9a
+          verify pr66 3b22fabc99cef39f20b87abe67e8e4e1a9c0e6c1
+          verify upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4
+          test "$(git hash-object runner/tools/ai0_full_module_parity.py)" = 20eab58e43bb2fdf09695321849cc0733d8b2582
+          rustc -vV
+      - name: Execute exact reviewed raw-module runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I runner/tools/ai0_full_module_parity.py \
+            --texture upstream/crates/victory-formats/src/texture.rs \
+            --primitive upstream/crates/victory-gpu/src/primitive.rs \
+            --pr64 pr64 --pr65 pr65 --pr66 pr66
