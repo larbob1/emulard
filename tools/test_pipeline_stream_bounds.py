@@ -54,9 +54,18 @@ struct GraphicsHead { root: This, stages: [Bytecode; 5] }
 struct ComputeHead { root: This, stage: Bytecode }
 const GRAPHICS_STAGES: [&str; 5] = ["vertex", "pixel", "domain", "hull", "geometry"];
 type Shader = (&'static str, Vec<u8>);
+// Stub mirrors the process-lifetime interning side effect so the actual
+// parser fixture detects copies on a rejected stream. No real shader code.
+struct RetainedShader { stage: &'static str, container: Vec<u8> }
+static SHADERS: std::sync::Mutex<Option<std::collections::HashMap<Shader, RetainedShader>>> =
+    std::sync::Mutex::new(None);
 fn copy(stage: &'static str, code: &Bytecode) -> Option<Shader> {
     if code.code.is_null() || code.size == 0 { return None; }
-    Some((stage, unsafe { std::slice::from_raw_parts(code.code, code.size) }.to_vec()))
+    let bytes = unsafe { std::slice::from_raw_parts(code.code, code.size) }.to_vec();
+    SHADERS.lock().unwrap().get_or_insert_with(Default::default)
+        .entry((stage, bytes.clone())).or_insert_with(||
+            RetainedShader { stage, container: bytes.clone() });
+    Some((stage, bytes))
 }
 #[cfg(windows)]
 mod host {
@@ -86,6 +95,8 @@ class PipelineStreamBoundsTests(unittest.TestCase):
         parser, = [s for s in postimages() if "fn create_stream(" in s]
         self.assertIn("if remaining < 8", parser)
         self.assertIn("if size > remaining", parser)
+        self.assertIn("bytecodes.push((stage, code))", parser)
+        self.assertLess(parser.index("graphics.read("), parser.index("filter_map(|(stage, code)| copy"))
         self.assertLess(parser.index("if size > remaining"), parser.index("cast::<Bytecode>()"))
         self.assertLess(parser.index("if size > remaining"), parser.index("graphics.read("))
 
@@ -161,7 +172,7 @@ fn explicit_and_appended_overflows_rejected() {
         creators = plain[plain.index("/// Device method.\npub(crate) extern \"system\" fn create_graphics("):]
         fixture = fixture.split("    /// The stream layout", 1)[0]
         # The real D3D12 nested fixture belongs to native Windows only.
-        fixture = fixture[fixture.index("    #[test]\n    fn pipeline_stream_rejects_invalid_shader_extent"):]
+        fixture = fixture[fixture.index("    #[test]\n    fn pipeline_stream_rejected_suffix_does_not_intern_valid_prefix"):]
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -173,7 +184,7 @@ fn explicit_and_appended_overflows_rejected() {
                            check=True, capture_output=True, text=True)
             result = subprocess.run([str(binary), "pipeline_stream_"], check=True,
                                     capture_output=True, text=True)
-            self.assertIn("8 passed; 0 failed", result.stdout)
+            self.assertIn("9 passed; 0 failed", result.stdout)
 
 if __name__ == "__main__":
     unittest.main()
