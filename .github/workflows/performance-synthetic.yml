@@ -25,11 +25,15 @@ jobs:
         run: |
           rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-tests
           /tmp/emulard-range-gate-tests
+      - name: Standalone exact placeholder hint tests
+        run: |
+          rustc --edition 2024 --test probes/placeholder_hint_tests.rs -o /tmp/emulard-placeholder-tests
+          /tmp/emulard-placeholder-tests
 
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-playtest-scatter' || github.head_ref == 'dev/performance-phase6-playtest-scatter'
     steps:
       - uses: actions/checkout@v4
         with:
