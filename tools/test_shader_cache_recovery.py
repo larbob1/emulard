@@ -147,6 +147,20 @@ fn main() {
 }
 '''
 
+class NativeShaderCacheFixtureTests(unittest.TestCase):
+    def test_native_equivalence_fixture_wiring(self):
+        fixture, = [new for old, new in PATCHES["crates/victory-gpu/src/shader_cache.rs"]
+                    if "fn shader_cache_reuse_actual_equivalence()" in new]
+        self.assertIn('matches!(mode.as_str(), "0" | "1")', fixture)
+        self.assertIn("for stage in STAGES", fixture)
+        self.assertIn("expected.clone()", fixture)
+        self.assertIn("assert_eq!(encode(&cold), encoded)", fixture)
+        self.assertIn('b"VSH1 damaged"', fixture)
+        self.assertIn("cached_with_policy(&cache, &[14u8; 32], container, translate, false)", fixture)
+        self.assertIn("Some(expected.clone())", fixture)
+        self.assertIn("#[ignore", fixture)
+
+
 @unittest.skipUnless(shutil.which("rustc"), "rustc required for portable shader cache tests")
 class ShaderCacheRecoveryTests(unittest.TestCase):
     @classmethod
