@@ -5,6 +5,9 @@ This is the project-level navigation on main. Runtime-specific documents are mai
 ## Getting started
 
 - [Main README](../README.md)
+- [Beginner's getting-started guide](GETTING-STARTED.md)
+- [Short performance test](PLAYTEST.md)
+- [Developer guide and build instructions](DEVELOPMENT.md)
 - [30 FPS roadmap](ROADMAP-30FPS.md)
 - [Branch policy](BRANCHES.md)
 - [Contributing](../CONTRIBUTING.md)
