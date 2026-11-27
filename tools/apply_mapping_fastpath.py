@@ -14,9 +14,8 @@ REPLACEMENTS = (
     // Only a complete, exact match may skip the host mapping operations.
     // Keep the same remapping guard and the dirty notification used by
     // alias_in_runs: equal mappings do not imply equal contents.
-    if skip_same() && !pages.is_null() && n != 0
-        && base.checked_add(n.saturating_mul(PAGE)).is_some()
-        && n.checked_mul(PAGE).is_some()
+    if skip_same() && !pages.is_null() && n != 0 && base % PAGE == 0
+        && n.checked_mul(PAGE).and_then(|bytes| base.checked_add(bytes)).is_some()
     {
         // SAFETY: same caller contract as the normal mapping path.
         let requested = unsafe { std::slice::from_raw_parts(pages, n) };
@@ -29,7 +28,12 @@ REPLACEMENTS = (
             let _changing = victory_gpu::title_memory_remapping();
             drop(physical);
             victory_gpu::title_memory_written(base, n * PAGE, true);
-            alias_line([1, n as u64, n as u64, 0, 0]);
+            // Keep direct mappings out of the existing alias-only rate counters.
+            static SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let count = SKIPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if count.is_power_of_two() {
+                tracing::info!(count, "unchanged physical mapping requests skipped");
+            }
             return address;
         }
     }
@@ -38,6 +42,7 @@ REPLACEMENTS = (
     (
         "    let ok = if alias_runs() { alias_in_runs(&mut physical, to, from, len) } else { alias_pages(&mut physical, to, from, len) };",
         """    if skip_same() && from != 0 && len != 0 && len % PAGE == 0
+        && from % PAGE == 0 && to % PAGE == 0
         && from.checked_add(len).is_some() && to.checked_add(len).is_some()
         && (0..len).step_by(PAGE).all(|k| {
             shown_slice(&physical, from + k).is_some_and(|want| {
