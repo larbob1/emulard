@@ -17,7 +17,7 @@ class ValidationPlanTests(unittest.TestCase):
     def test_storage_codec_exact_plan(self):
         with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
             validate_paired(Path("."))
-        for name, ignored in (("zlib_then_bcpack", False), ("zlib_into_pages_in_place_and_across_allocations", False), ("zlib_inflate_handles_short_exact_empty_and_bad_streams", False), ("storage_codec_native_chain_address", True), ("storage_codec_native_chain_pages", True), ("storage_codec_native_partial_error", True)):
+        for name, ignored in (("zlib_then_bcpack", False), ("zlib_into_pages_in_place_and_across_allocations", False), ("zlib_inflate_handles_short_exact_empty_and_bad_streams", False), ("tests::storage_codec_native_chain_address", True), ("tests::storage_codec_native_chain_pages", True), ("tests::storage_codec_native_partial_error", True), ("early_drop_off::storage_codec_native_chain_address", True), ("early_drop_off::storage_codec_native_chain_pages", True), ("early_drop_off::storage_codec_native_partial_error", True), ("early_drop_on::storage_codec_native_chain_address", True), ("early_drop_on::storage_codec_native_chain_pages", True), ("early_drop_on::storage_codec_native_partial_error", True)):
             selected = [c for c in suite.call_args_list if c.args[1:3] == ("victory-hle", name)]
             self.assertEqual(len(selected), 1)
             self.assertEqual(selected[0].kwargs["expected"], 1)
@@ -26,7 +26,7 @@ class ValidationPlanTests(unittest.TestCase):
 
     def test_storage_codec_exact_count(self):
         from build_runtime import test_suite
-        for name in ("storage_codec_native_chain_address", "storage_codec_native_chain_pages", "storage_codec_native_partial_error"):
+        for name in ("tests::storage_codec_native_chain_address", "tests::storage_codec_native_chain_pages", "tests::storage_codec_native_partial_error", "early_drop_off::storage_codec_native_chain_address", "early_drop_off::storage_codec_native_chain_pages", "early_drop_off::storage_codec_native_partial_error", "early_drop_on::storage_codec_native_chain_address", "early_drop_on::storage_codec_native_chain_pages", "early_drop_on::storage_codec_native_partial_error"):
             for output, ok in (("test result: ok. 1 passed; 0 failed;", True),
                                ("test result: ok. 0 passed; 0 failed;", False),
                                ("test result: ok. 2 passed; 0 failed;", False),
@@ -41,7 +41,7 @@ class ValidationPlanTests(unittest.TestCase):
                     self.assertEqual(run.call_args.args[0], ["cargo", "test", "--locked", "-p", "victory-hle", "--lib",
                         name, "--", "--ignored", "--test-threads=1"])
         with patch("build_runtime.subprocess.run") as run:
-            for name, expected in (("storage_codec_native_", 3), ("storage_codec_native_chain_address", None)):
+            for name, expected in (("storage_codec_native_", 3), ("storage_codec_native_chain_address", 1), ("tests::storage_codec_native_chain_address", None), ("early_drop_off::storage_codec_native_chain_address", 2)):
                 with self.assertRaises(ValueError):
                     test_suite(Path("."), "victory-hle", name, expected=expected, ignored=True)
             run.assert_not_called()
