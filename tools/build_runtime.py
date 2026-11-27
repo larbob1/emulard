@@ -108,7 +108,7 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-gpu", name)
     suite("victory-shader", "wave64_tests")
     suite("victory-gpu", "compositor", diagnostics=True)
-    suite("victory-gpu", "cpu_trace::", diagnostics=True)
+    suite("victory-gpu", "cpu_trace", diagnostics=True)
     attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
     attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
     if failures:

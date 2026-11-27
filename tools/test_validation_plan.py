@@ -18,7 +18,7 @@ class ValidationPlanTests(unittest.TestCase):
         with patch("build_runtime.test_suite") as suite, patch("build_runtime.run") as run:
             validate_paired(Path("."))
         selected = [c for c in suite.call_args_list
-                    if c.args[1:3] == ("victory-gpu", "cpu_trace::")]
+                    if c.args[1:3] == ("victory-gpu", "cpu_trace")]
         self.assertEqual(len(selected), 1)
         self.assertTrue(selected[0].kwargs["diagnostics"])
         self.assertEqual(run.call_count, 2)
