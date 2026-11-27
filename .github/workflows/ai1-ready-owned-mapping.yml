@@ -1,0 +1,46 @@
+name: AI1 isolated ready owned mapping
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/validate_ai1_ready_owned_mapping.py'
+      - 'probes/ai1_ready_owned_mapping.rs'
+      - '.github/workflows/ai1-ready-owned-mapping.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ready-owned-mapping:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-ready-owned-mapping'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 036dec4dc4b6a012d2e860e1ae779b67f75719eb
+          path: ai0-pr71
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 344e09c49f406d8a986eb8ff25eef2189bdabc19
+          path: ai1-pr89
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_ready_owned_mapping.py
+      - name: Exercise actual ready recording with owned OS pages
+        run: python tools/validate_ai1_ready_owned_mapping.py --proposal ai0-pr71 --prior ai1-pr89
