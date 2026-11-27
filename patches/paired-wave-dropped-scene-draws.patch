@@ -78,3 +78,178 @@
  }
  
  /// Counts a draw or dispatch of `this` intentionally skipped or dropped
+@@ -674,87 +686,97 @@
+ /// A pipeline described as a stream: its size and the subobjects, each a
+ /// type then its data, padded to 8 bytes.
+ #[repr(C)]
+ pub(crate) struct StreamDesc {
+     size: usize,
+     stream: *const u8,
+ }
+ 
+ /// A subobject type's size (type included), and the stage it is if it is a
+ /// shader. The console numbers amplification and mesh shaders 23 and 24
+ /// (PC: 24 and 25); its own types from 25 on are not sized yet.
+ fn subobject(kind: u32) -> Option<(usize, Option<&'static str>)> {
+     let stage = |name| Some((24, Some(name)));
+     match kind {
+         1 => stage("vertex"),
+         2 => stage("pixel"),
+         3 => stage("domain"),
+         4 => stage("hull"),
+         5 => stage("geometry"),
+         6 => stage("compute"),
+         23 => stage("amplification"),
+         24 => stage("mesh"),
+         0 => Some((16, None)),
+         12 | 19 => Some((24, None)),
+         7 | 15 => Some((40, None)),
+         8 => Some((336, None)),
+         10 => Some((48, None)),
+         11 => Some((56, None)),
+         17 => Some((16, None)),
+         21 => Some((64, None)),
+         22 => Some((32, None)),
+         9 | 13 | 14 | 16 | 18 | 20 => Some((8, None)),
+         _ => None,
+     }
+ }
+ 
+ /// Device method: a pipeline from a stream; the shaders are kept, and the
+ /// graphics state for the host pipeline.
+ pub(crate) extern "system" fn create_stream(
+     _: This,
+     desc: *const StreamDesc,
+     iid: *const Iid,
+     out: *mut This,
+ ) -> HRESULT {
+     // SAFETY: the title passes a description (null is tolerated).
+     let Some(desc) = (unsafe { desc.as_ref() }) else {
+         return E_INVALIDARG;
+     };
+-    if desc.stream.is_null() {
++    if desc.stream.is_null() || desc.size > isize::MAX as usize {
+         return E_INVALIDARG;
+     }
+     let mut shaders = Vec::new();
+     #[cfg(windows)]
+     let mut graphics = host::GraphicsState::default();
+     let mut at = 0;
+-    while at + 8 <= desc.size {
+-        // SAFETY: inside the stream the title passes.
++    while at < desc.size {
++        let remaining = desc.size - at;
++        if remaining < 8 {
++            tracing::warn!(at, remaining, "truncated pipeline subobject header");
++            return E_INVALIDARG;
++        }
++        // SAFETY: at least a complete header is inside the declared stream.
+         let kind = unsafe { desc.stream.add(at).cast::<u32>().read_unaligned() };
+         let Some((size, stage)) = subobject(kind) else {
+             tracing::warn!(
+                 kind,
+                 at,
+                 "pipeline subobject of unknown size; the rest is ignored"
+             );
+             break;
+         };
++        if size > remaining {
++            tracing::warn!(kind, at, size, remaining, "truncated pipeline subobject");
++            return E_INVALIDARG;
++        }
+         if let Some(stage) = stage {
+-            // SAFETY: a shader subobject has its bytecode at +8.
+-            let code = unsafe { &*desc.stream.add(at + 8).cast::<Bytecode>() };
+-            shaders.extend(copy(stage, code));
++            // SAFETY: the whole subobject fits, including bytecode at +8.
++            // Streams may arrive at an unaligned address.
++            let code = unsafe { desc.stream.add(at + 8).cast::<Bytecode>().read_unaligned() };
++            shaders.extend(copy(stage, &code));
+         }
+         #[cfg(windows)]
+         // SAFETY: a whole subobject of this kind lies at `at`.
+         unsafe {
+             graphics.read(kind, desc.stream.add(at))
+         };
+         at += size;
+     }
+     hand_out(
+         shaders,
+         #[cfg(windows)]
+         Some(Box::new(graphics)),
+         iid,
+         out,
+     )
+ }
+ 
+@@ -885,6 +907,70 @@
++    fn stream_result(bytes: &[u8], declared: usize) -> (HRESULT, This) {
++        let desc = StreamDesc { size: declared, stream: bytes.as_ptr() };
++        let mut p = std::ptr::null();
++        let hr = create_stream(std::ptr::null(), &desc, &PIPELINE_IIDS[0], &mut p);
++        (hr, p)
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_short_headers() {
++        let bytes = [0u8; 8];
++        for len in 1..8 {
++            assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()));
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_every_truncated_known_kind() {
++        for kind in 0u32..=24 {
++            let Some((size, _)) = subobject(kind) else { continue };
++            let mut bytes = vec![0u8; size];
++            bytes[..4].copy_from_slice(&kind.to_le_bytes());
++            for len in 8..size {
++                assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()),
++                    "kind {kind}, declared {len}, full size {size}");
++            }
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_truncation_after_valid_prefix() {
++        let mut bytes = [0u8; 32];
++        bytes[..4].copy_from_slice(&9u32.to_le_bytes());
++        bytes[8..12].copy_from_slice(&1u32.to_le_bytes());
++        for len in 9..32 {
++            assert_eq!(stream_result(&bytes, len), (E_INVALIDARG, std::ptr::null()));
++        }
++    }
++
++    #[test]
++    fn pipeline_stream_rejects_impossible_extent() {
++        let bytes = [0u8; 8];
++        assert_eq!(stream_result(&bytes, (isize::MAX as usize) + 1),
++            (E_INVALIDARG, std::ptr::null()));
++    }
++
++    #[test]
++    fn pipeline_stream_reads_unaligned_bytecode_and_preserves_unknown_stop() {
++        let code = [23u8, 42, 99];
++        let mut backing = [0u64; 5];
++        // SAFETY: backing has 40 writable bytes, offset one is unaligned.
++        let bytes = unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>().add(1), 32) };
++        bytes[..4].copy_from_slice(&1u32.to_le_bytes());
++        bytes[8..16].copy_from_slice(&(code.as_ptr() as u64).to_le_bytes());
++        bytes[16..24].copy_from_slice(&(code.len() as u64).to_le_bytes());
++        bytes[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
++        for len in [24, 32] {
++            let (hr, p) = stream_result(bytes, len);
++            assert_eq!(hr, S_OK);
++            assert!(!p.is_null());
++            assert_eq!(shaders(p), [("vertex", code.to_vec())]);
++            assert_eq!(release(p), 0);
++        }
++    }
++
+     /// The stream layout the title builds (title+0x86f090): root
+     /// signature, five shader slots (the first a mesh shader), blend, sample
+     /// mask, rasterizer, depth-stencil 1, sample description, input layout,
+     /// topology, render target and depth formats: 0x2b0 bytes.
+     #[test]
+     fn streams_yield_their_shaders() {
