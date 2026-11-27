@@ -1,0 +1,36 @@
+name: Texture publication preview review
+on:
+  push:
+    branches: ['dev/performance-phase6-texture-publication-review']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare pinned runtime and inspect exact proposal
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="$RUNNER_TEMP/review-runtime"
+          if ! python tools/build_runtime.py "$runtime" --paired-wave-refresh > "$RUNNER_TEMP/prepare.log" 2>&1; then
+            echo "Pinned preparation failed"
+            exit 1
+          fi
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/before.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/before.status"
+          python tools/propose_texture_publication.py "$runtime" > "$RUNNER_TEMP/preview.diff"
+          test -s "$RUNNER_TEMP/preview.diff"
+          git -C "$runtime" diff --binary HEAD > "$RUNNER_TEMP/after.diff"
+          git -C "$runtime" status --porcelain --untracked-files=all > "$RUNNER_TEMP/after.status"
+          cmp "$RUNNER_TEMP/before.diff" "$RUNNER_TEMP/after.diff"
+          cmp "$RUNNER_TEMP/before.status" "$RUNNER_TEMP/after.status"
+          echo "Both prepared texture publication anchors accepted; tracked diff and status unchanged"
