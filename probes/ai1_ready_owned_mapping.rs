@@ -17,12 +17,12 @@ mod ai1_ready_owned_review {
     thread_local! {
         static OWNED: RefCell<HashMap<u64, Arc<Shadow>>> = RefCell::new(HashMap::new());
     }
-    struct Allocation(*mut core::ffi::c_void);
+    struct Allocation(*mut core::ffi::c_void, usize);
     impl Allocation {
         fn new() -> Self {
             let p = unsafe { VirtualAlloc(A as *const _, BYTES, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) };
             assert!(!p.is_null(), "bounded owned allocation unavailable");
-            let owned = Self(p);
+            let mut owned = Self(p, 0);
             assert_eq!(p as u64, A, "unexpected allocation address");
             assert!(C / PAGE < u64::from(MEMORY_PAGES) - 1);
             // Only touch bytes returned by the allocation.
@@ -32,6 +32,7 @@ mod ai1_ready_owned_review {
             }
             for at in [A,B,C] {
                 crate::shadow::register(at as usize, at, PAGE);
+                owned.1 += 1;
             }
             owned
         }
@@ -41,11 +42,11 @@ mod ai1_ready_owned_review {
             // No list was submitted. On failure drop Memory and fixture
             // references before freeing owned pages. The registry is local
             // to this exact fresh test process.
-            if self.0 as u64 == A {
+            if self.1 != 0 {
                 let memory = MEMORY.lock().unwrap_or_else(|e| e.into_inner()).take();
                 drop(memory);
                 OWNED.with(|m| m.borrow_mut().clear());
-                for at in [A,B,C] {
+                for at in [A,B,C].into_iter().take(self.1) {
                     crate::shadow::unregister(at as usize, at);
                 }
             }
