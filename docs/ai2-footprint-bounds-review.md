@@ -1,0 +1,13 @@
+# P15/P16/P21 — staging footprint bounds review
+
+Claim #12 7229979103. Base 033f6bbb537293dcca9290e867998cf2c06aa867; upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4. Descriptor-only fixture `probes/ai2_footprint_bounds.rs`, blob d5bb76c6f1eec278d3bb99a953bf964670c73b09.
+
+Source anchors: GPU texture.rs raw caf17099100edb798b9eb1913bcc58ffa186201e staging1465+ obtains GetCopyableFootprints total, passes it to staging_buffer; detile1185+ constructs full pitch*rows*depth slices before Layout::detile or zero fill. Host upload_buffer7707+ uses requested width (max1); pooled staging rounds to a power of two, but unpooled route retains total. Logical buffer width is not physical allocation granularity.
+
+Microsoft reference: https://github.com/microsoft/DirectX-Headers/blob/main/include/directx/d3dx12_resource_helpers.h (D3DX12GetCopyableFootprints) excludes final row padding. https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device-getcopyablefootprints distinguishes active row size from aligned pitch. This is reference-source evidence, not an executed WARP receipt.
+
+Fixture queries actual WARP device footprints for five descriptors, checks independent active row size/row count/depth, aligned offsets/pitches, checked active and full ends, exact total and unpooled excess. Includes 4x2 R8 expected 260 vs 512, aligned RGBA8 control, array/mips, 3D and BC1. Small rounded pool extent modeled separately; no real staging allocation or map, no construction of invalid slices. No GPU queue, title, or owner access.
+
+Request AI1 append-only isolated registration against verified prepared texture source (reconcile #102 prepared identity fe0526831acf2b0f68caa4163fda83b251c22bb0), exact pre/postimage, fresh Windows WARP debug/release diagnostics, exact texture::ai2_footprint_bounds_review::actual_descriptor_final_row_extent filter with --nocapture and bounded watchdog; retain numeric receipts and assert one pass/zero failed/ignored each. If API returns other sizes preserve contrary evidence. No native execution yet.
+
+Possible future fix options require independent review: allocate checked maximum full extent while keeping logical copy size distinct, or restrict detile slices to checked active extent and separately audit on-demand zeroing (currently full slice fill). Do not merely shorten slices or change pooling/telemetry blindly. Validate actual formats, mips, array, volume, plane handling, footprint count, row/depth arithmetic, padding and lifetime. #101/#102 adverse publication reproduction is separate. No production policy/default edits, no merge or performance claim.
