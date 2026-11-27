@@ -15,6 +15,20 @@ class PipelineCompletionStripeTests(unittest.TestCase):
         self.assertTrue(any("wait_completion(completion(p), started, left, || p.made.get().is_some())" in new
                             for _,new in pairs))
 
+    def test_native_pending_fixture_wiring(self):
+        fixture, = [new for old,new in PATCHES["crates/victory-gpu/src/pipeline/make.rs"]
+                    if "actual_pending_refusal_notifies_waiters" in new]
+        self.assertIn('#[ignore = "isolated completion mode;',fixture)
+        self.assertIn('matches!(mode.as_str(), "0" | "1")',fixture)
+        self.assertIn('COMPLETIONS.select(',fixture)
+        self.assertEqual(fixture.count("Pending::new(Vec::new(), None)"),2)
+        self.assertLess(fixture.index("entered_rx.recv_timeout"),fixture.index("other.make()"))
+        self.assertLess(fixture.index("other.make()"),fixture.index("done_rx.try_recv()"))
+        self.assertLess(fixture.index("done_rx.try_recv()"),fixture.index("target.make()"))
+        self.assertLess(fixture.index("target.make()"),fixture.index("done_rx.recv_timeout"))
+        self.assertIn("Some(None)",fixture)
+        self.assertIn("wait_completion(completion(target)",fixture)
+
     @unittest.skipUnless(shutil.which("rustc"), "rustc required")
     def test_actual_helpers(self):
         new, = [new for old,new in PATCHES["crates/victory-gpu/src/pipeline/make.rs"]
