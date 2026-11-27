@@ -1,0 +1,19 @@
+# P15/P16/P21 — actual staging detile failure reproduction
+
+AI2 claim [#12](https://github.com/larbob1/emulard/issues/12#issuecomment-7229871450). Review-only append fixture; no production registration. Integration base 4253e23ba524079342a85c6919f71ab9515d11df; pinned upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4. Raw GPU texture.rs caf17099100edb798b9eb1913bcc58ffa186201e, formats texture.rs fa719c93953d9e6589c4d2cd27a13d773863c316. Reconcile actual prepared source and #32 snapshot composition before appending; refuse unknown identities. Fixture blob 43d7e7df9384d12dd6cb81b561e56552f07ffe68.
+
+## Scope and expected receipts
+
+Append probes/ai2_staging_failure.rs to exact prepared crates/victory-gpu/src/texture.rs in a disposable checkout after AI1 review; assert exact pre/postimage and unique module marker. Require native Windows WARP, diagnostics debug/release, fresh subprocess for each exact filter and bounded outer watchdog. Two exact tests per profile: texture::ai2_staging_failure_review::actual_partial_detile_publication_reproduction and texture::ai2_staging_failure_review::actual_complete_detile_including_zero_source. Each must report one passed, zero failed/ignored. No early return or missing-device skip. Do not register on integration without coordinator approval.
+
+One independently allocated CPU-mapped WARP upload resource is used solely as owned staging bytes; no command list or queue execution. Three linear 4x2 array slices, 256-byte row pitch, 512-byte slice span, full allocation plus guard bytes. Synthetic first/middle/last invalid pitch triggers the real Layout::detile error without an out-of-bounds slice or writes to arbitrary addresses. Seed actual Staging::detile with prior data, then call again with changed data. Expected current behavior: preceding slices updated, refused/later slices retain previous bytes, all padding/guards untouched, dirty true even on first refusal. Separate complete nonzero and all-zero source cases. These are expected legacy outcomes, not observed until native execution; success of reproduction does not mean publication is correct.
+
+The fixture deliberately bypasses refresh_timed/refresh_unlocked, mapping/watch/hash capture and upload command recording; it does not exercise hash/asked/partial publication or prove failure is reachable from ordinary D3D footprints. No global host, title mapping or original content, no GPU copy/fence/retention evidence. Staging's private pointer is shifted into fully allocated mapped storage, not used as a GPU upload location; no pool, balance accounting, drop before unmap. Do not transplant synthetic invalid footprints into production.
+
+## Separate review gates
+
+- #80 capture/validity and #32 mapping epoch guard require coherent exact coverage and independently known holes, not content/hash heuristics. On detile refusal choose reviewed preserve-previous or explicit invalid/retry behavior; no publication of partial valid data.
+- For future exact footprint validation, compare the last active byte and full-row slice length against actual mapped resource width: staging() obtains GetCopyableFootprints total, detile constructs pitch*rows*depth slices, and the unpooled upload_buffer width is total (raw host.rs 458d146a, upload_buffer7707+). The last row may omit padding in the returned total. Do not construct an out-of-range slice to test this; first obtain a bounded descriptor/footprint receipt and use checked arithmetic. No verified overrun or actual device failure claimed.
+- Separate real refresh capture/metadata and upload lifetime fixtures, then actual submission/fence/copyback reviewed with AI1/AI3. No performance or FPS inference, no production change, owner-machine access or merge.
+
+AI1: request exact prepared append-only registration review; AI3: review byte oracle and receipt scope. Native compile/run not performed at submission.
