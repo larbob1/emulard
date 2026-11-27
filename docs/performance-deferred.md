@@ -28,9 +28,8 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P18 | 6 | Candidate | Opt-in paired-wave DirectStorage worker cap implemented. Descriptor/command list caching, release/PGO evaluation, native Linux backend feasibility and measured worker tuning remain open. |
 | P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Actual compile and end-to-end results, and other runtime variant ports remain open. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
-| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. | 
+| P21 | 4 | Open | Validate Phase 4 scalar/AVX2 equivalence, sparse merge conflicts, exact mask runs, idle memory cap and CPU/RAM/transfer telemetry; benchmark each switch separately and together. |
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
-
 | P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
 | P24 | 6 | Open | Repair any remaining compile/CI failures; verify the builder anchor fix and all cumulative source patches on pinned checkouts. |
 
@@ -50,3 +49,16 @@ implementation sequence, not a performance release. All 24 register items
 remain unresolved pending their acceptance evidence. No item is closed on
 implementation alone. Keep this register on subsequent branches and record
 actual test results and benchmarks before closing items.
+
+## Recorded validation evidence
+
+- Phase 5 commit `3d1673ea6a443df9ee33b677a52080a343863f12`:
+  [synthetic CI](https://github.com/larbob1/emulard/actions/runs/45935638184)
+  failed 1 of 91 Python tests (overlapping builder anchors).
+- Phase 6 commit `59c3cfb6406a5947a077af57651482ca44ee549c`:
+  [synthetic PR CI](https://github.com/larbob1/emulard/actions/runs/45935874457)
+  passed the Python test step (93 tests) and standalone range-gate test step
+  (4 tests). This resolves the synthetic anchor-test failure, not P01/P09/P24
+  as a whole. The Windows runtime validation
+  [run](https://github.com/larbob1/emulard/actions/runs/45935865574) was still
+  in progress when this evidence was recorded. No gameplay benchmark is recorded.
