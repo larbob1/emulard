@@ -1,0 +1,51 @@
+# P22: cache directory ownership review
+
+Scope: graphics #14, pinned upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4.
+Test only. No change to the driver, cache format, file mapping, runtime
+defaults or actual cache directory.
+
+## Source evidence
+
+* `pipeline/library.rs::save` derives the staging filename from
+  LIBRARY_FILE.with_extension("tmp"); the process-local save gate cannot
+  coordinate independent processes.
+* `write_atomically` similarly derives one fixed temporary early-list
+  filename. The existing USED set is a process-local snapshot.
+* `replace_library` publishes a pending file when NEXT already exists;
+  its existence check and rename are not a cross-process transaction.
+* Startup `Blob::of` may promote NEXT; `open` may rename a rejected
+  library. A writer-only lock around save would not protect those operations.
+* Distinct temporary names prevent accidental staging aliasing but cannot
+  merge independently built opaque driver blobs.
+
+The new test harness extracts the current actual Rust rename helper from
+apply_pipeline_perf.py and invokes independent child processes on isolated
+synthetic directories. It deliberately reproduces three counterexamples:
+shared staging names, independent names with stale source snapshots, and
+last-writer-wins publication to NEXT. Test success demonstrates the file
+operation hazard, not that it occurred in any title run. It does not
+instantiate D3D12, test a mapped Windows blob or infer RSS or FPS.
+
+## Proposed boundary for a later candidate
+
+Prefer one nonblocking directory-owner lease for the entire cache session,
+acquired before any startup promotion, rejection rename, or save, not
+just during publication. A non-owner must never alter that directory;
+private cache directories or an explicitly reviewed read-only/no-cache
+fallback are possible. Avoid removing a live lease by pathname, process-ID
+guessing, or unsafe stale-lock cleanup. A platform-specific implementation
+must establish exclusion across processes, release on process exit and
+crash, behavior on unsupported filesystems, and compatible lock ordering.
+Preserve the mapped blob's lifetime and driver validation. No opaque blob
+merge is assumed. Do not change default policy without review.
+
+Native tests required before promotion: two independent processes, owner
+and contender, startup NEXT promotion and rejection while contested,
+normal exit and abrupt termination, owner reacquisition, failure paths,
+mapped-file lifetime, early-list behavior and cache-disabled fallback.
+Review lock semantics on native Windows and Proton separately. Test only
+synthetic private cache data; never touch title or existing user cache.
+
+B003 reported no usable library and zero saved bytes; these hazards do
+not explain that failure. Actual initialization HRESULT, cache ownership
+evidence, and matched cold/warm gameplay remain outstanding.
