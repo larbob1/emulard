@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 import unittest
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 from benchmark_pairs import aggregate
 from frame_report import summarize
 from test_frame_report import sample
@@ -16,6 +21,41 @@ class BenchmarkPairsTests(unittest.TestCase):
         self.assertTrue(result["at_least_three_pairs"])
         self.assertFalse(result["operator_reported_visible_scene"])
         self.assertNotIn("synthetic-prefix", str(result))
+
+    def test_partial_pairs_and_independent_frame_tails(self):
+        batch = "frame times: 2 frames in 0.1 s: shortest 40 ms, median 50, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 40 60"
+        a = summarize([sample(300), sample(300, 1), batch])
+        b = summarize([sample(150), batch])
+        frames_only = summarize([batch])
+        result = aggregate([(a, b), (frames_only, frames_only), (summarize([]), b)])
+        self.assertEqual(result["usable_interval_pairs"], 1)
+        self.assertEqual(result["usable_individual_pairs"], 2)
+        self.assertEqual(result["incomplete_pairs"], 2)
+        self.assertEqual(result["median_paired_speedup"], 2)
+        self.assertEqual(result["median_paired_approx_present_fps_ratio"], 1)
+        self.assertEqual(result["runs"][0]["baseline_drop_interval_fraction"], 0.5)
+        self.assertEqual(result["runs"][1]["baseline_individual"]["frame_ms_percentiles"]["p99"], 60)
+        self.assertIsNone(result["runs"][2]["speedup"])
+        self.assertFalse(result["at_least_three_usable_interval_pairs"])
+        self.assertEqual(result["candidate_pairs_with_unknown_drops"], 1)
+
+    def test_cli_warmup_and_duplicate_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a, b = (Path(directory) / name for name in ("private-a.log", "private-b.log"))
+            batch = "frame times: 2 frames in 0.1 s: shortest 40 ms, median 50, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 40 60"
+            for path in (a, b):
+                path.write_text("\n".join([sample(), batch, sample(), batch]), encoding="utf-8")
+            command = [sys.executable, str(Path(__file__).with_name("benchmark_pairs.py")),
+                       "--skip", "1", "--skip-frame-batches", "1", "--target-fps", "30"]
+            proc = subprocess.run(command + ["--pair", str(a), str(b)], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            result = json.loads(proc.stdout)
+            self.assertEqual(result["runs"][0]["baseline_intervals"], 1)
+            self.assertEqual(result["runs"][0]["baseline_individual"]["samples"], 2)
+            self.assertNotIn(directory, proc.stdout)
+            duplicate = subprocess.run(command + ["--pair", str(a), str(a)], capture_output=True, text=True)
+            self.assertEqual(duplicate.returncode, 1)
+            self.assertNotIn(directory, duplicate.stdout)
 
     def test_empty_input(self):
         with self.assertRaises(ValueError):
