@@ -76,5 +76,18 @@ no GPU execution. Wrapper destruction is tested without dereferencing
 it afterwards. No production cleanup approval, no actual replay or
 in-flight fence proof; next fixtures must cover real bind and detach,
 slot replacement and submitted/replayed list retention, with independent
-fence/late publication proof. Two Python checks validate wiring only;
+fence/late publication proof. Three Python checks validate wiring only;
 native compilation and WARP execution are outstanding.
+
+### Deferred slot correction and positive control
+
+Pinned descriptor/host.rs::HostHeap::mirror defers buffer descriptors when
+for_draw is false. The fixture now requires an unmaterialized slot before
+State::heap_buffers, then checks the actual materialized slot and the same
+Shadow identity/range after the first pass. Temporary lookup references
+are dropped before inspecting deferred list state. The stride table has a
+separate COM identity: each list must hold exactly one explicit stride pin
+(including the second list's FRAME skip), ONCE cannot duplicate it, and
+reset clears it. This positive control distinguishes a functioning kept
+COM observer from an absence of explicit buffer pins. It does not prove
+all owners or GPU execution safety. No production semantics are changed.
