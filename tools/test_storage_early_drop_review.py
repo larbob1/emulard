@@ -13,6 +13,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 PATH = Path("crates/victory-hle/src/modules/dstorage.rs")
 FIXTURE_PIN = "807146cc059631a47e5f4c99962d3cf78db8d736"
+# Git blob identities of LF-normalized prepared source and exact execute
+# slice, reconstructed from upstream 51700c6 plus the two worker-cap edits.
+PREPARED_PIN = "bee5b9d71cb8f11c060b798485bd8e68391b36bd"
+EXECUTE_PIN = "1b2d667447f5f3f0f94fcc25f224ffb3e1869277"
 START = "fn execute(request: &Request) -> Result<(), HRESULT> {"
 END = "\n/// Inflates a zlib stream into `out`, returning the bytes written."
 OLD = "        packed.truncate(n);\n        Cow::Owned(packed)"
@@ -36,12 +40,24 @@ def fixture():
     return raw.decode("utf-8")
 
 
-def clone_execute(source):
+def execute_slice(source):
     if MARKER in source or source.count(START) != 1 or source.count(END) != 1:
         raise ValueError("execute boundary mismatch")
     begin = source.index(START)
     end = source.index(END, begin)
-    original = source[begin:end].rstrip()
+    return source[begin:end]
+
+
+def verify_prepared(source, *, source_pin=PREPARED_PIN, execute_pin=EXECUTE_PIN):
+    # read_text normalizes CRLF to LF on Windows; do not strip whitespace.
+    if blob_id(source.encode("utf-8")) != source_pin:
+        raise ValueError("full prepared dstorage source identity mismatch")
+    if blob_id(execute_slice(source).encode("utf-8")) != execute_pin:
+        raise ValueError("prepared execute identity mismatch")
+
+
+def clone_execute(source):
+    original = execute_slice(source).rstrip()
     if original.count(OLD) != 1:
         raise ValueError("chained Cow anchor mismatch")
     clone = original.replace(START, SIGNATURE, 1).replace(OLD, NEW, 1)
@@ -66,7 +82,10 @@ def transform(source, fragment):
         raise ValueError("native test insertion anchor mismatch")
     insert = clone_execute(source) + "\n\n"
     insert += (mode_fixture(fragment, False) + "\n" + mode_fixture(fragment, True)).rstrip() + "\n\n"
-    return source.replace(ANCHOR, insert + ANCHOR, 1)
+    proposed = source.replace(ANCHOR, insert + ANCHOR, 1)
+    if proposed.replace(insert, "", 1) != source:
+        raise ValueError("test-only insertion not reversible")
+    return proposed
 
 
 class StorageEarlyDropReviewTests(unittest.TestCase):
@@ -84,6 +103,20 @@ class StorageEarlyDropReviewTests(unittest.TestCase):
         for invalid in (source.replace(OLD, "", 1), source + ANCHOR, result):
             with self.assertRaises(ValueError):
                 transform(invalid, f)
+
+    def test_full_pin_rejects_dependency_and_execute_drift(self):
+        source = self.example()
+        pins = dict(source_pin=blob_id(source.encode()),
+                    execute_pin=blob_id(execute_slice(source).encode()))
+        verify_prepared(source, **pins)
+        # Even with all clone anchors intact, drift outside the execute
+        # function must not be accepted as the reviewed native baseline.
+        for changed in (source + "// dependency drift\n",
+                        source.replace("}", " }", 1), source + "\n"):
+            with self.assertRaisesRegex(ValueError, "full prepared"):
+                verify_prepared(changed, **pins)
+        with self.assertRaisesRegex(ValueError, "execute identity"):
+            verify_prepared(source, source_pin=pins["source_pin"], execute_pin="0" * 40)
 
     def test_explicit_modes_preserve_six_native_cases(self):
         f = fixture()
@@ -105,11 +138,13 @@ def main():
     args = parser.parse_args()
     path = args.checkout / PATH
     try:
-        proposed = transform(path.read_text(encoding="utf-8"), fixture())
+        source = path.read_text(encoding="utf-8")
+        verify_prepared(source)
+        proposed = transform(source, fixture())
         if args.apply:
             path.write_text(proposed, encoding="utf-8")
         else:
-            print("Early drop: exact test-only clone and both fixture modes verified")
+            print("Early drop: full prepared source and execute identities, exact clone and both modes verified")
     except (OSError, ValueError) as exc:
         parser.exit(1, f"Early drop preview failed: {exc}\n")
 
