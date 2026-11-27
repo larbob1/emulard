@@ -140,7 +140,9 @@ reused. [Source commit](https://github.com/avatarmanz/VIctory-7900XTX/commit/ca1
 ### Experimental paired-wave refresh
 
 Prepare the paired-wave translator from [fxceless PR #854](https://github.com/fxceless/victory-fork/pull/854)
-with Emulard's Wine memory and integer blend patches.
+with Emulard's Wine memory and integer blend patches. This build composites
+the scene and overlay in retail PresentX calls. It also reads FidelityFX
+`FSPX` programs in `ACCC` containers through the shader translator.
 
 ```sh
 python3 tools/build_runtime.py ../runtime-paired-wave --paired-wave-refresh
@@ -153,7 +155,11 @@ the translator recognizes it as exact. Use `VICTORY_WAVE_PAIRS=0` to compare
 with the paired-wave fallback disabled.
 
 Replay captured shaders with `victory translate --pipelines` before testing
-in Story Mode. Driver acceptance establishes pipeline creation.
+in Story Mode. In a local Proton run, all five targeted compute pipelines
+were created during the Story Mode transition. The captured FidelityFX
+programs parse, then stop when the translator encounters a descriptor
+modified after loading. The two console pipeline creation methods at slots
+`0x1c8` and `0x218` remain unimplemented.
 
 ### Replay tile mappings
 

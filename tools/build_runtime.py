@@ -41,11 +41,17 @@ def main():
         if ns.paired_wave_refresh:
             run(["git", "fetch", "--no-tags", "origin", PAIRED_WAVE_REFRESH], target)
             run(["git", "checkout", "--detach", PAIRED_WAVE_REFRESH], target)
-            for patch in ("belobug-integer-blend-fxceless.patch", "wine-disk-backed-memory.patch"):
+            for patch in (
+                "belobug-integer-blend-fxceless.patch",
+                "wine-disk-backed-memory.patch",
+                "paired-wave-presentx.patch",
+                "paired-wave-accc.patch",
+            ):
                 run(["git", "apply", str(own / "patches" / patch)], target)
             run(["git", "diff", "--check"], target)
             if ns.build:
                 run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
+                run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
                 build_binaries(target)
             else:
                 print("Patched source prepared; compilation not attempted.")
