@@ -47,6 +47,23 @@ class FullModuleParityTests(unittest.TestCase):
             self.assertFalse(receipt_ok(bad, self.expected))
         self.assertFalse(receipt_ok("", frozenset()))
 
+    def test_reject_contradictory_extra_output(self):
+        listing = "tests::one: test\ntests::two: test\n2 tests, 0 benchmarks\n"
+        receipt = ("running 2 tests\ntest tests::one ... ok\ntest tests::two ... ok\n"
+                   "test result: ok. 2 passed; 0 failed; 0 ignored; "
+                   "0 measured; 0 filtered out; finished in 0.00s\n")
+        self.assertTrue(listing_ok(listing, self.expected))
+        self.assertTrue(receipt_ok(receipt, self.expected))
+        for extra in ("extra: benchmark\n", "unexpected output\n", "1 test, 0 benchmarks\n"):
+            self.assertFalse(listing_ok(listing + extra, self.expected))
+        for extra in ("test tests::extra ... FAILED\n",
+                      "test result: FAILED. 0 passed; 1 failed;\n",
+                      "unexpected output\n"):
+            self.assertFalse(receipt_ok(receipt + extra, self.expected))
+            self.assertFalse(receipt_ok(extra + receipt, self.expected))
+        self.assertFalse(receipt_ok(receipt.replace("running 2", "running 3"), self.expected))
+        self.assertFalse(receipt_ok(receipt.replace("0.00s", "0.00s garbage"), self.expected))
+
     def test_real_compiler_and_receipt_on_tiny_generated_module(self):
         rustc = shutil.which("rustc")
         self.assertIsNotNone(rustc, "Rust compiler required")
