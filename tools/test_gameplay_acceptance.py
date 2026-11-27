@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from frame_report import summarize
 from gameplay_acceptance import CHECKS, CONFIG_FIELDS, evaluate
@@ -113,6 +115,42 @@ class AcceptanceTests(unittest.TestCase):
         other["runs"][0]["id"] = other["runs"][1]["id"]
         with self.assertRaises(ValueError):
             self.assess(other, lines)
+
+    def test_cli_normalized_log_copies_are_not_independent(self):
+        manifest, lines = fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            variants = ["\n".join(lines), "\r\n".join(lines) + "\r\n",
+                        "\n".join(lines) + "\n"]
+            for run, content in zip(manifest["runs"], variants):
+                (root / run["log"]).write_bytes(content.encode("utf-8"))
+            p = root / "manifest.json"
+            p.write_text(json.dumps(manifest), encoding="utf-8")
+            proc = subprocess.run([sys.executable,
+                                   str(Path(__file__).with_name("gameplay_acceptance.py")),
+                                   str(p)], capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["status"],
+                             "invalid_or_unavailable_evidence")
+            self.assertNotIn(directory, proc.stdout)
+
+    def test_cli_refuses_log_changed_during_read(self):
+        from gameplay_acceptance import main
+        manifest, lines = fixture(seconds=1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for run in manifest["runs"]:
+                (root / run["log"]).write_text("\n".join(lines), encoding="utf-8")
+            p = root / "manifest.json"
+            p.write_text(json.dumps(manifest), encoding="utf-8")
+            before = SimpleNamespace(st_size=100, st_mtime_ns=1, st_ctime_ns=1)
+            after = SimpleNamespace(st_size=101, st_mtime_ns=2, st_ctime_ns=2)
+            with patch.object(sys, "argv", ["gameplay_acceptance.py", str(p)]), \
+                 patch("benchmark_pairs.os.fstat", side_effect=[before, after]), \
+                 patch("builtins.print") as output:
+                self.assertEqual(main(), 1)
+                self.assertEqual(json.loads(output.call_args.args[0])["status"],
+                                 "invalid_or_unavailable_evidence")
 
     def test_cli_duplicate_content_and_success(self):
         manifest, lines = fixture()

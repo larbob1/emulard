@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Evaluate owner-attested gameplay evidence; never export paths or metadata."""
 import argparse
-import hashlib
 import json
 from math import isfinite
 from pathlib import Path
 import re
 
-from frame_report import summarize
+from benchmark_pairs import read_distinct_log
 
 MILESTONES = (5, 10, 20, 30)
 CONFIG_FIELDS = ("revision", "platform", "driver", "hardware", "profile", "scene",
@@ -185,23 +184,10 @@ def main():
         for run in manifest["runs"]:
             if not isinstance(run, dict) or not isinstance(run.get("log"), str):
                 raise ValueError("invalid log reference")
-            path = (args.manifest.parent / run["log"]).resolve()
-            if path in paths:
-                raise ValueError("repeated input path")
-            paths.add(path)
-            # Hash locally while parsing; never export a digest or raw log.
-            digest = hashlib.sha256()
-            with path.open("rb") as handle:
-                def lines():
-                    for line in handle:
-                        digest.update(line)
-                        yield line.decode("utf-8", errors="replace")
-                report = summarize(lines(), target_fps=30)
-            fingerprint = digest.digest()
-            if fingerprint in digests:
-                raise ValueError("identical log content")
-            digests.add(fingerprint)
-            reports.append(report)
+            path = args.manifest.parent / run["log"]
+            # Use the same normalized input identity and change-during-read
+            # checks as paired benchmarks. Keep all evidence local.
+            reports.append(read_distinct_log(path, paths, digests, 0, 0, 30))
         result = evaluate(manifest, reports)
     except (OSError, ValueError, TypeError, OverflowError):
         print(json.dumps({"status": "invalid_or_unavailable_evidence"}))
