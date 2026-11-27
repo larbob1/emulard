@@ -34,6 +34,17 @@ class HeapRecordingObservationTests(unittest.TestCase):
             self.assertIn(f'assert_eq!({pin}, 1',src)
             self.assertGreaterEqual(src.count(f'assert_eq!({pin}, 0)'),2)
 
+    def test_real_slot_rewrite_is_observed_before_wrapper_release(self):
+        src = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/descriptor.rs"])
+        start = src.index("desc[6] = (LEN / 8) as u32")
+        finish = src.index("slot rewrite does not repair FRAME skip", start)
+        section = src[start:finish]
+        self.assertIn("create_placed_srv(std::ptr::null(), &resource, &desc, handle)", section)
+        self.assertIn("old slot COM reference removed", section)
+        self.assertIn("heap_host.mirror(0, handle, true)", section)
+        self.assertIn("slot rewrite preserves first recorded ownership", section)
+        self.assertLess(finish, src.index("assert_eq!(release(h), 0)", finish))
+
     def test_observers_are_test_only_and_nonowning(self):
         draw = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/draw.rs"])
         host = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/host.rs"])
