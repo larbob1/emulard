@@ -22,3 +22,6 @@ Current handoff: memory owns PR #9/#10; graphics and reliability may begin their
 
 ## AI 1 latest handoff
 P04/P08/P10: candidate 49ca476, PR #10. Native test-only pinned read fixture committed; latest CI pending. P05 PR #9 native passed at 72fcda9. Earlier software replay native passed at 2465f0a. Next: verify new fixture and mirror native results, audit read-only consumer and synchronization contracts with graphics before changing production reads. No other agent branch touched; performance unmeasured.
+
+## AI 1 coordinated handoff
+P07 PR #16 at 1f5cbf1; synthetic checks passed; native pending. P04/P10 pinned native read still pending; requested graphics agreement on GPU synchronization before production consumer work. Requested AI 3 report allowlist for scatter counters. AI 2 PR #14 and AI 3 PR #15 opened independently; coordinator review and owner merge approval outstanding. No cross-branch changes.
