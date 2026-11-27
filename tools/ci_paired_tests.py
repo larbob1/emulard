@@ -17,7 +17,7 @@ def main():
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if revision != PAIRED_WAVE_REFRESH:
         parser.error("Unexpected pinned revision.")
-    validate_paired(root)
+    validate_paired(root, keep_going=True)
 
 if __name__ == "__main__":
     main()

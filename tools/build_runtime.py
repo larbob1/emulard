@@ -57,29 +57,46 @@ def test_suite(target, package, suite, *, env=None, diagnostics=False):
         print(f"Runtime test matched no passing tests: {package} {suite}", flush=True)
         raise subprocess.CalledProcessError(1, command)
 
-def validate_paired(target):
+def validate_paired(target, *, keep_going=False):
+    failures = []
+
+    def attempt(label, action):
+        try:
+            action()
+        except subprocess.CalledProcessError:
+            if not keep_going:
+                raise
+            failures.append(label)
+            print(f"Runtime validation failed: {label}", flush=True)
+
+    def suite(package, name, *, env=None, diagnostics=False):
+        attempt(f"{package} {name}", lambda: test_suite(target, package, name, env=env, diagnostics=diagnostics))
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_RUNS="0", VICTORY_MAP_DIFF="0")
-        test_suite(target, "victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+        suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
     for runs in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS=runs)
-        test_suite(target, "victory-hle", "physical_pages_map_alias_and_unmap", env=env)
-        test_suite(target, "victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
+        suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
+        suite("victory-hle", "a_read_in_place_never_meets_the_gap_of_a_remapping", env=env)
     for mode in ("0", "1"):
         env = dict(os.environ, VICTORY_MAP_SKIP_SAME=mode, VICTORY_MAP_DIFF=mode, VICTORY_MAP_RUNS=mode)
-        test_suite(target, "victory-hle", "tile_replay_checks", env=env)
-    test_suite(target, "victory-hle", "perf6_worker_tests")
-    test_suite(target, "victory-gpu", "mapping_tests")
-    test_suite(target, "victory-gpu", "perf4_tests")
+        suite("victory-hle", "tile_replay_checks", env=env)
+    suite("victory-hle", "perf6_worker_tests")
+    suite("victory-gpu", "mapping_tests")
+    suite("victory-gpu", "perf4_tests")
     for enabled in ("0", "1"):
         env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
-        for suite in ("difference_tests", "merge_tests"):
-            test_suite(target, "victory-gpu", suite, env=env)
-    for suite in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
-        test_suite(target, "victory-gpu", suite)
-    test_suite(target, "victory-shader", "wave64_tests")
-    test_suite(target, "victory-gpu", "compositor", diagnostics=True)
-    build_binaries(target)
+        for name in ("difference_tests", "merge_tests"):
+            suite("victory-gpu", name, env=env)
+    for name in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
+        suite("victory-gpu", name)
+    suite("victory-shader", "wave64_tests")
+    suite("victory-gpu", "compositor", diagnostics=True)
+    attempt("release build", lambda: run(["cargo", "build", "--locked", "--release", "-p", "victory"], target))
+    attempt("diagnostics build", lambda: run(["cargo", "build", "--locked", "--profile", "diag", "-p", "victory", "--features", "diagnostics"], target))
+    if failures:
+        print(f"Runtime validation failed groups: {len(failures)}", flush=True)
+        raise subprocess.CalledProcessError(1, ["paired-wave validation"])
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)

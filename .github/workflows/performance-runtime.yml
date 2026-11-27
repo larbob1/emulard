@@ -8,6 +8,10 @@ on:
       - 'README.md'
   workflow_dispatch:
 
+concurrency:
+  group: paired-wave-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -32,7 +32,11 @@ def run_stage(label, args, cwd):
             panic_locations = set()
             last_switches = None
             failed_tests = set()
+            failed_groups = []
             for line in output:
+                group = re.fullmatch(rb"Runtime validation failed: ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
+                if group:
+                    failed_groups.append(group[1].decode("ascii"))
                 switches = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
                 if switches:
                     last_switches = switches[1].decode("ascii")
@@ -103,6 +107,8 @@ def run_stage(label, args, cwd):
                 print("Runtime test switches: " + last_switches)
             if panic_locations:
                 print("Runtime panic locations: " + ", ".join(sorted(panic_locations)))
+            if failed_groups:
+                print("Failed validation groups: " + ", ".join(failed_groups))
             if failed_tests:
                 print("Failed runtime test names: " + ", ".join(sorted(failed_tests)))
             if empty_tests:
