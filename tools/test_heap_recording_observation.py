@@ -18,6 +18,22 @@ class HeapRecordingObservationTests(unittest.TestCase):
         self.assertNotIn('crate::shadow::unregister(',src)
         self.assertNotIn('VirtualFree(',src)
 
+    def test_slot_materialization_and_stride_positive_control(self):
+        src = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/descriptor.rs"])
+        pre = src.index('assert!(!heap_host.made(0)')
+        refresh = src.index('a.observe_heap_buffers_for_test(&first)')
+        post = src.index('assert!(heap_host.made(0)')
+        self.assertLess(pre, refresh)
+        self.assertLess(refresh, post)
+        self.assertIn('heap_host.shows(0, &shadow.buffer), None',src)
+        self.assertIn('heap_host.shows(0, &shadow.buffer), Some(true)',src)
+        self.assertIn('FRAME skip still pins stride table',src)
+        self.assertIn('ONCE must not duplicate stride pin',src)
+        for name in ("first", "second"):
+            pin = f'{name}.observe_recorded_ownership(shadow_id,stride_identity).2'
+            self.assertIn(f'assert_eq!({pin}, 1',src)
+            self.assertGreaterEqual(src.count(f'assert_eq!({pin}, 0)'),2)
+
     def test_observers_are_test_only_and_nonowning(self):
         draw = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/draw.rs"])
         host = "\n".join(new for _,new in PATCHES["crates/victory-gpu/src/host.rs"])
