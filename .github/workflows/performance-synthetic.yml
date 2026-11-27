@@ -33,7 +33,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-cpu-trace-native' || github.head_ref == 'dev/performance-phase6-cpu-trace-native'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-cpu-trace-count-proof' || github.head_ref == 'dev/performance-phase6-cpu-trace-count-proof'
     steps:
       - uses: actions/checkout@v4
         with:

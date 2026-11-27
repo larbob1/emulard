@@ -15,18 +15,29 @@ def validation_summary(lines):
     # Only emit fixed suite names, statuses and allowlisted binary flags.
     # Associate switches with the result for that individual invocation.
     switches = b""
+    active = None
+    counts = None
     results = []
     for line in lines:
-        if re.fullmatch(rb"Running runtime test: victory-[a-z-]+ [A-Za-z0-9_]+\s*", line):
+        start = re.fullmatch(rb"Running runtime test: (victory-[a-z-]+ [A-Za-z0-9_]+)\s*", line)
+        if start:
             switches = b""
+            active = start[1]
+            counts = None
+        count = re.fullmatch(rb"Runtime test counts: (victory-[a-z-]+ [A-Za-z0-9_]+) passed=([0-9]{1,9}) failed=([0-9]{1,9})\s*", line)
+        if count and count[1] == active:
+            counts = b" [passed=" + count[2] + b" failed=" + count[3] + b"]"
         setting = re.fullmatch(rb"Runtime test switches: ((?:VICTORY_[A-Z0-9_]+=[01] ?)+)\s*", line)
         if setting:
             switches = setting[1].strip()
         status = re.fullmatch(rb"Runtime validation (passed|failed): ((?:victory-[a-z-]+ [A-Za-z0-9_]+)|release build|diagnostics build)\s*", line)
         if status:
             extra = b" [" + switches + b"]" if switches and status[2].startswith(b"victory-") else b""
-            results.append((status[1] + b": " + status[2] + extra).decode("ascii"))
+            proof = counts if status[1] == b"passed" and status[2] == active and counts is not None else b""
+            results.append((status[1] + b": " + status[2] + extra + proof).decode("ascii"))
             switches = b""
+            active = None
+            counts = None
     return results
 
 def run_stage(label, args, cwd):
