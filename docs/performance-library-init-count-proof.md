@@ -1,0 +1,3 @@
+# Pipeline-library diagnostics exact native count
+
+Follow-up to #38 41661797f22f27c70ea70b08dc51ddab8c4d699c. Existing native 45947055104 published suite success but not its count. Four pinned test functions cover opt-in, disabled/success silence, signed failure phase/code once, and preservation of owned results. Require a single cargo lib summary of exactly four passed and zero failures, matching sanitized count proof from #40, and reject absent/empty/partial/extra/multiple/failure summaries. Both profiles and prior validation retained. No source/diagnostic behavior changes, actual device HRESULT or title launch approval. Native run must complete before claiming exact-four proof.

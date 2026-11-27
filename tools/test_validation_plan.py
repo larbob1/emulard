@@ -21,7 +21,27 @@ class ValidationPlanTests(unittest.TestCase):
                     if c.args[1:3] == ("victory-gpu", "library_init_diagnostic_tests")]
         self.assertEqual(len(selected), 1)
         self.assertTrue(selected[0].kwargs["diagnostics"])
+        self.assertEqual(selected[0].kwargs["expected"], 4)
         self.assertEqual(run.call_count, 2)
+
+    def test_exact_native_count(self):
+        from build_runtime import test_suite
+        for output, ok in (
+            ("test result: ok. 4 passed; 0 failed; 0 ignored;", True),
+            ("test result: ok. 3 passed; 0 failed; 1 ignored;", False),
+            ("test result: ok. 0 passed; 0 failed;", False),
+            ("no matching summary", False),
+            ("test result: ok. 5 passed; 0 failed;", False),
+            ("test result: ok. 2 passed; 0 failed;\ntest result: ok. 2 passed; 0 failed;", False),
+            ("test result: FAILED. 4 passed; 1 failed;", False),
+        ):
+            with self.subTest(output=output), patch("build_runtime.subprocess.run") as run:
+                run.return_value.stdout = output
+                if ok:
+                    test_suite(Path("."), "victory-gpu", "library_init_diagnostic_tests", expected=4)
+                else:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        test_suite(Path("."), "victory-gpu", "library_init_diagnostic_tests", expected=4)
 
     def test_default_fails_fast(self):
         with patch("build_runtime.test_suite", side_effect=subprocess.CalledProcessError(1, ["test"])) as suite, patch("build_runtime.run") as run:
