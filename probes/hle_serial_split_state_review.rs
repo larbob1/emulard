@@ -2,12 +2,14 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak, mpsc};
 use std::thread::{self, JoinHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const LIMIT: Duration = Duration::from_secs(5);
 type Job = Box<dyn FnOnce() + Send>;
+type Task = Box<dyn FnOnce(bool) + Send>;
 struct State {
-    jobs: VecDeque<Job>,
+    jobs: VecDeque<Task>,
     closed: bool,
     wait_epoch: usize,
     ended: bool,
@@ -22,6 +24,7 @@ struct Port {
 }
 struct Queue {
     ports: [Arc<Port>; 2],
+    terminated: AtomicBool,
 }
 impl Drop for Port {
     fn drop(&mut self) {
@@ -34,7 +37,7 @@ impl Drop for Port {
     }
 }
 impl Port {
-    fn submit(&self, job: Job) {
+    fn submit(&self, job: Task) {
         let mut s = self.worker.state.lock().unwrap();
         assert!(!s.closed);
         s.jobs.push_back(job);
@@ -43,13 +46,35 @@ impl Port {
 }
 impl Queue {
     fn new(work: Arc<Port>, completion: Arc<Port>) -> Arc<Self> {
-        Arc::new(Self { ports: [work, completion] })
+        Arc::new(Self { ports: [work, completion], terminated: AtomicBool::new(false) })
     }
     fn composite(source: &Self) -> Arc<Self> {
         Self::new(source.ports[0].clone(), source.ports[1].clone())
     }
     fn submit(&self, slot: usize, job: Job) {
-        self.ports[slot].submit(job);
+        assert!(self.submit_task(slot, Box::new(move |canceled| {
+            assert!(!canceled);
+            job();
+        })));
+    }
+    fn submit_task(&self, slot: usize, task: Task) -> bool {
+        if self.terminated.load(Ordering::Acquire) { return false; }
+        self.deliver(slot, task);
+        true
+    }
+    fn deliver(&self, slot: usize, task: Task) {
+        // Already accepted delayed work uses this path, without a second
+        // termination check, matching the pinned source's behavior.
+        self.ports[slot].submit(task);
+    }
+    fn terminate(&self) {
+        self.terminated.store(true, Ordering::Release);
+        // Preserve each slot's distinct drain, even if both alias one port.
+        for port in &self.ports {
+            let pending: Vec<_> = port.worker.state.lock().unwrap().jobs.drain(..).collect();
+            port.worker.ready.notify_all();
+            for task in pending { task(true); }
+        }
     }
 }
 struct Harness {
@@ -73,7 +98,7 @@ fn start() -> (Arc<Queue>, Harness) {
         loop {
             if let Some(job) = s.jobs.pop_front() {
                 drop(s);
-                job();
+                job(false);
                 s = shared.state.lock().unwrap();
             } else if s.closed {
                 s.ended = true;
@@ -243,4 +268,103 @@ fn empty_notification_rechecks_before_submission() {
     assert_eq!(rx.recv_timeout(LIMIT).unwrap(), 8);
     drop(q);
     h.finish();
+}
+
+fn report_task(tx: &mpsc::Sender<(u32, bool)>, id: u32) -> Task {
+    let tx = tx.clone();
+    Box::new(move |canceled| tx.send((id, canceled)).unwrap())
+}
+
+// Characterize the current shared-drain behavior, not an API conformance claim.
+#[test]
+fn termination_drains_shared_queue_without_closing_survivor() {
+    let (q, h) = start();
+    let other = Queue::composite(&q);
+    let (entered, entered_rx) = mpsc::channel();
+    let (release, gate) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
+    let active = tx.clone();
+    assert!(q.submit_task(0, Box::new(move |canceled| {
+        entered.send(()).unwrap();
+        gate.recv_timeout(LIMIT).unwrap();
+        active.send((1, canceled)).unwrap();
+    })));
+    entered_rx.recv_timeout(LIMIT).unwrap();
+    assert!(q.submit_task(0, report_task(&tx, 2)));
+    assert!(other.submit_task(1, report_task(&tx, 3)));
+    q.terminate();
+    // Both were queued on the shared port, including other queue's work.
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (2, true));
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (3, true));
+    assert!(!q.submit_task(0, report_task(&tx, 4)));
+    assert!(other.submit_task(0, report_task(&tx, 5)));
+    drop(q);
+    assert!(!h.worker.state.lock().unwrap().closed);
+    release.send(()).unwrap();
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (1, false));
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (5, false));
+    drop(other);
+    h.finish();
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn second_aliased_slot_drains_reentrant_submission() {
+    let (q, h) = start();
+    let other = Queue::composite(&q);
+    let (entered, entered_rx) = mpsc::channel();
+    let (release, gate) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
+    let active = tx.clone();
+    assert!(q.submit_task(0, Box::new(move |canceled| {
+        entered.send(()).unwrap();
+        gate.recv_timeout(LIMIT).unwrap();
+        active.send((1, canceled)).unwrap();
+    })));
+    entered_rx.recv_timeout(LIMIT).unwrap();
+    let reentrant = other.clone();
+    let callback_tx = tx.clone();
+    assert!(q.submit_task(0, Box::new(move |canceled| {
+        callback_tx.send((2, canceled)).unwrap();
+        assert!(reentrant.submit_task(0, report_task(&callback_tx, 3)));
+    })));
+    // First slot drains callback 2. Its reentrant submission to the open
+    // composite is drained by the second slot while worker remains gated.
+    q.terminate();
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (2, true));
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (3, true));
+    assert!(other.submit_task(1, report_task(&tx, 4)));
+    release.send(()).unwrap();
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (1, false));
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (4, false));
+    drop(q);
+    drop(other);
+    h.finish();
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn accepted_delayed_delivery_survives_queue_termination_and_close() {
+    let (q, h) = start();
+    let (release, gate) = mpsc::channel();
+    let (tx, rx) = mpsc::channel();
+    let retained = q.clone();
+    // Model the initial acceptance check and retained delayed closure.
+    assert!(!q.terminated.load(Ordering::Acquire));
+    let delayed = thread::spawn(move || {
+        gate.recv_timeout(LIMIT).unwrap();
+        retained.deliver(0, report_task(&tx, 6));
+    });
+    q.terminate();
+    let (rejected_tx, rejected_rx) = mpsc::channel();
+    assert!(!q.submit_task(0, report_task(&rejected_tx, 7)));
+    drop(q);
+    assert_eq!(h.port.strong_count(), 2);
+    assert!(!h.worker.state.lock().unwrap().closed);
+    release.send(()).unwrap();
+    assert_eq!(rx.recv_timeout(LIMIT).unwrap(), (6, false));
+    delayed.join().unwrap();
+    h.finish();
+    assert!(rejected_rx.try_recv().is_err());
+    assert!(rx.try_recv().is_err());
 }

@@ -23,9 +23,9 @@ class HleSerialSplitStateReview(unittest.TestCase):
                 result = subprocess.run([str(binary), "--test-threads=1"],
                                         capture_output=True, text=True, timeout=40)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
+                self.assertIn("test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out",
                               result.stdout)
-            print("HLE serial split state review: 10 runs, each 7 passed; 0 failed; 0 ignored", flush=True)
+            print("HLE serial split state review: 10 runs, each 10 passed; 0 failed; 0 ignored", flush=True)
 
 
 if __name__ == "__main__":
