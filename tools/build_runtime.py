@@ -63,6 +63,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_diff.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_texture_snapshot.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_gpu_copy_perf.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_pipeline_perf.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 for mode in ("0", "1"):
@@ -78,6 +79,8 @@ def main():
                     env = dict(os.environ, VICTORY_BACK_AVX2=enabled, VICTORY_BACK_SPARSE_MERGE=enabled)
                     for suite in ("difference_tests", "merge_tests"):
                         subprocess.run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], cwd=target, env=env, check=True)
+                for suite in ("perf5_queue_tests", "draws_promote_early_pipelines_without_claiming_them_twice", "names_change_with_what_goes_into_the_pipeline", "translations_come_back_from_the_cache"):
+                    run(["cargo", "test", "--locked", "-p", "victory-gpu", suite], target)
                 run(["cargo", "test", "--locked", "-p", "victory-shader", "wave64_tests"], target)
                 run(["cargo", "test", "--locked", "-p", "victory-gpu", "--features", "diagnostics", "compositor"], target)
                 build_binaries(target)

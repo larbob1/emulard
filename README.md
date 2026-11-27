@@ -243,6 +243,13 @@ The Phase 4 paired-wave candidate offers opt-in `VICTORY_BACK_AVX2=1`,
 `VICTORY_BACK_IDLE_MB`. See [Phase 4 validation](docs/performance-phase4.md)
 for independent tests, caveats and the deferred production dirty bitmap.
 
+### Experimental pipeline scheduling and cache publication
+
+Phase 5 adds `VICTORY_PIPELINE_WORKERS` and `VICTORY_PIPELINE_GRAPHICS_BURST`
+for optional compiler scheduling experiments and process-local pipeline
+cache publication fixes. See [Phase 5 validation](docs/performance-phase5.md)
+and the [cumulative register](docs/performance-deferred.md).
+
 ### Buffer-copy performance under Proton
 
 In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`
