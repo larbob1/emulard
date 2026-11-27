@@ -49,12 +49,13 @@ fn storage_completion_native_address() {
     let (_dir, file) = file_with(&data);
     let file = CompletionFile(file);
     let mut destinations = Box::new([[COMPLETION_SENTINEL; 32]; 3]);
+    let pointers = destinations.each_mut().map(|b| b[8..24].as_mut_ptr().cast::<c_void>());
     let array = CompletionArray(status_array(3));
     // Declared last: on unwind close before any input/destination is freed.
     let queue = CompletionQueue(new_queue(0));
     let offsets = completion_offsets(data.len());
     for i in 0..2 {
-        let r = request(0, destinations[i][8..24].as_mut_ptr().cast(),
+        let r = request(0, pointers[i],
                         16, file.0.cast_const(), offsets[i] as u64, 16);
         enqueue(queue.0, &r);
         enqueue_status(queue.0, array.0, i as u32);
@@ -62,7 +63,7 @@ fn storage_completion_native_address() {
     void(queue.0, 0x30);
     let first = [wait(array.0, 0), wait(array.0, 1)];
     // A new request on the same queue after the failed segment.
-    let r = request(0, destinations[2][8..24].as_mut_ptr().cast(),
+    let r = request(0, pointers[2],
                     16, file.0.cast_const(), offsets[2] as u64, 16);
     enqueue(queue.0, &r);
     enqueue_status(queue.0, array.0, 2);
@@ -132,11 +133,12 @@ fn storage_completion_native_pages() {
     let file = CompletionFile(file);
     for separate in [false, true] {
         let mut destinations = Box::new(std::array::from_fn::<_, 3, _>(|_| CompletionPages::new(separate)));
+        let pointers = destinations.each_mut().map(|p| p.ids.as_mut_ptr().cast::<c_void>());
         let array = CompletionArray(status_array(3));
         let queue = CompletionQueue(new_queue(1));
         let offsets = completion_offsets(data.len());
         for i in 0..2 {
-            let mut r = request(PAGE_DESTINATION, destinations[i].ids.as_mut_ptr().cast(),
+            let mut r = request(PAGE_DESTINATION, pointers[i],
                                 16, file.0.cast_const(), offsets[i] as u64, 16);
             r.page_offset = (PAGE - 8) as u64;
             enqueue(queue.0, &r);
@@ -144,7 +146,7 @@ fn storage_completion_native_pages() {
         }
         void(queue.0, 0x30);
         let first = [wait(array.0, 0), wait(array.0, 1)];
-        let mut r = request(PAGE_DESTINATION, destinations[2].ids.as_mut_ptr().cast(),
+        let mut r = request(PAGE_DESTINATION, pointers[2],
                             16, file.0.cast_const(), offsets[2] as u64, 16);
         r.page_offset = (PAGE - 8) as u64;
         enqueue(queue.0, &r);
