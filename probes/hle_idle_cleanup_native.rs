@@ -20,6 +20,7 @@ mod hle_idle_cleanup_native_review {
     static RELEASE: OnceLock<Mutex<Option<mpsc::Receiver<()>>>> = OnceLock::new();
     static HANDLES: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
 
+    static RELEASED: AtomicBool = AtomicBool::new(false);
     static TLS_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     struct Cleanup;
@@ -44,7 +45,7 @@ mod hle_idle_cleanup_native_review {
         let rx = RELEASE.get().and_then(|m| m.lock().ok())
             .and_then(|mut slot| slot.take());
         if let Some(rx) = rx {
-            let _ = rx.recv_timeout(LIMIT * 3);
+            RELEASED.store(rx.recv_timeout(LIMIT * 3).is_ok(), Ordering::SeqCst);
         }
     }
 
@@ -116,6 +117,7 @@ mod hle_idle_cleanup_native_review {
             handles.pop().unwrap()
         };
         // No scheduler/handle mutex is held while releasing or waiting.
+        assert_eq!(unsafe { WaitForSingleObject(first_handle.as_raw_handle(), 0) }, WAIT_TIMEOUT);
         release_tx.send(()).unwrap();
         for handle in [first_handle, second_handle] {
             // SAFETY: borrowed thread handle, bounded native wait.
@@ -124,6 +126,7 @@ mod hle_idle_cleanup_native_review {
         }
         assert!(rx.try_recv().is_err());
         assert!(lock(&HANDLES).is_empty());
+        assert!(RELEASED.load(Ordering::SeqCst), "gate release not received");
         assert_eq!(TLS_DROPS.load(Ordering::SeqCst), 2);
     }
 }

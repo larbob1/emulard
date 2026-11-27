@@ -13,6 +13,7 @@ mod hle_idle_boundary_review {
     static OBSERVED: OnceLock<mpsc::Sender<usize>> = OnceLock::new();
     static EVENTS: OnceLock<mpsc::Sender<usize>> = OnceLock::new();
     static GATE: OnceLock<mpsc::Sender<(usize, usize, mpsc::Sender<()>)>> = OnceLock::new();
+    static RELEASED: AtomicBool = AtomicBool::new(false);
     static GATED: AtomicBool = AtomicBool::new(false);
 
     fn observe_wait(empty: bool) -> bool {
@@ -31,7 +32,7 @@ mod hle_idle_boundary_review {
             if !GATED.swap(true, Ordering::SeqCst) {
                 let (release, wait) = mpsc::channel();
                 if tx.send((queued, idle, release)).is_ok() {
-                    let _ = wait.recv_timeout(LIMIT * 3);
+                    RELEASED.store(wait.recv_timeout(LIMIT * 3).is_ok(), Ordering::SeqCst);
                 }
             }
         }
@@ -103,6 +104,7 @@ mod hle_idle_boundary_review {
         release.send(()).unwrap();
         assert_eq!(rx.recv_timeout(LIMIT).unwrap(), 2);
         assert_eq!(pool.retired.load(Ordering::SeqCst), 0);
+        assert!(RELEASED.load(Ordering::SeqCst), "gate release not received");
         assert!(rx.try_recv().is_err());
         // Workers persist only until this isolated process exits.
     }
@@ -135,6 +137,7 @@ mod hle_idle_boundary_review {
         submitter.join().unwrap();
         assert_eq!(rx.recv_timeout(LIMIT).unwrap(), 2);
         until_retired(pool, 2);
+        assert!(RELEASED.load(Ordering::SeqCst), "gate release not received");
         assert!(rx.try_recv().is_err());
     }
 }
