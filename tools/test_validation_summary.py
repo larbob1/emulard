@@ -20,5 +20,40 @@ class ValidationSummaryTests(unittest.TestCase):
             "passed: release build",
         ])
 
+    def test_counts_only_for_matching_successful_suite(self):
+        lines = [
+            b"Running runtime test: victory-gpu cpu_trace\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation passed: victory-gpu cpu_trace\n",
+            b"Running runtime test: victory-gpu window_tests\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation passed: victory-gpu window_tests\n",
+            b"Running runtime test: victory-gpu cpu_trace\n",
+            b"Runtime test counts: victory-gpu cpu_trace passed=30 failed=0\n",
+            b"Runtime validation failed: victory-gpu cpu_trace\n",
+            b"Runtime validation passed: diagnostics build\n",
+        ]
+        self.assertEqual(validation_summary(lines), [
+            "passed: victory-gpu cpu_trace [passed=30 failed=0]",
+            "passed: victory-gpu window_tests",
+            "failed: victory-gpu cpu_trace",
+            "passed: diagnostics build",
+        ])
+
+    def test_completion_counts_associate_with_each_mode(self):
+        label = b"victory-gpu actual_pending_refusal_notifies_waiters"
+        lines = []
+        for mode in (b"0", b"1"):
+            lines.extend([
+                b"Running runtime test: " + label + b"\n",
+                b"Runtime test switches: VICTORY_PIPELINE_COMPLETION_STRIPES=" + mode + b"\n",
+                b"Runtime test counts: " + label + b" passed=1 failed=0\n",
+                b"Runtime validation passed: " + label + b"\n",
+            ])
+        self.assertEqual(validation_summary(lines), [
+            "passed: victory-gpu actual_pending_refusal_notifies_waiters [VICTORY_PIPELINE_COMPLETION_STRIPES=0] [passed=1 failed=0]",
+            "passed: victory-gpu actual_pending_refusal_notifies_waiters [VICTORY_PIPELINE_COMPLETION_STRIPES=1] [passed=1 failed=0]",
+        ])
+
 if __name__ == "__main__":
     unittest.main()
