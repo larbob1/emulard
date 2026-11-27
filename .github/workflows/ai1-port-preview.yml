@@ -1,0 +1,95 @@
+name: AI1 exact prepared port preview
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/preview_ai1_port_contract.py'
+      - 'tools/test_preview_ai1_port_contract.py'
+      - '.github/workflows/ai1-port-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-port-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-port-contract-preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact candidate and run preview contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.event.pull_request.head.sha }}'
+          printf 'candidate_head=%s\n' "$(git rev-parse HEAD)"
+          python -m unittest discover -s tools -p test_preview_ai1_port_contract.py -v
+      - name: Prepare pinned scratch runtime without building
+        run: python tools/build_runtime.py "$RUNNER_TEMP/ai1-port-preview" --paired-wave-refresh
+      - name: Verify eight actual prepared-source modes without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import itertools
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          target = Path(os.environ["RUNNER_TEMP"]) / "ai1-port-preview"
+          shadow = "crates/victory-gpu/src/shadow.rs"
+          texture = "crates/victory-formats/src/texture.rs"
+          sh = ["40f1ae02506de251d51e00ebfd36f58e58e7621b",
+                "7229972b47fc789ec2c9968f48b41db6b8e785f0"]
+          tx = {(False,False): "fa719c93953d9e6589c4d2cd27a13d773863c316",
+                (True,False): "b38ff33b12552b996c614b6819989db5adb9b3c2",
+                (False,True): "0debdf9eb188313a25f0541e3ba4ff4972163735",
+                (True,True): "9d5f96c702a0a125f04bd34d4247091a3e23c131"}
+          def git(*args):
+              return subprocess.check_output(["git", "-C", str(target), *args])
+          assert git("rev-parse", "HEAD").decode().strip() == "51700c6d43a3507fa65e50fe4bb64074ce706cd4"
+          def untracked():
+              # Existing preparation can create new source files. Compare
+              # their identities AND bytes, rather than assuming none exist.
+              names = git("ls-files", "-z", "--others", "--exclude-standard").split(b"\0")
+              result = {}
+              for raw in filter(None, names):
+                  name = os.fsdecode(raw)
+                  path = target / name
+                  if path.is_symlink():
+                      result[name] = ("symlink", os.readlink(path))
+                  else:
+                      assert path.resolve(strict=True).is_relative_to(target.resolve())
+                      assert path.is_file(), "unexpected untracked file type"
+                      result[name] = ("file", path.stat().st_mode, path.read_bytes())
+              return result
+          def snapshot():
+              return (git("status", "--porcelain=v1", "--untracked-files=all"),
+                      git("diff", "--binary", "HEAD"),
+                      untracked(),
+                      (target/shadow).read_bytes(), (target/texture).read_bytes())
+          before = snapshot()
+          print("prepared untracked inventory=" + json.dumps(sorted(before[2])), flush=True)
+          for c,d,s in itertools.product((False,True),repeat=3):
+              args = [sys.executable,"tools/preview_ai1_port_contract.py",str(target)]
+              args += [flag for enabled,flag in zip((c,d,s),
+                  ("--correct-cut","--detile-last-run","--spread-table")) if enabled]
+              receipt = json.loads(subprocess.check_output(args,text=True))
+              assert receipt["mode"] == {"C":c,"D":d,"S":s}
+              assert receipt["preimage_lf"] == {shadow:sh[0],texture:tx[False,False]}
+              assert receipt["postimage_lf"] == {shadow:sh[c],texture:tx[d,s]}
+              assert receipt["would_change"] == sorted(
+                  ([shadow] if c else []) + ([texture] if d or s else []))
+              assert snapshot() == before, "preview mutated scratch checkout"
+              print(json.dumps(receipt,sort_keys=True),flush=True)
+          print("8/8 exact prepared-source previews verified; no build or mutation",flush=True)
+          PY
