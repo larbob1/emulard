@@ -25,6 +25,23 @@ class ShaderBuildMemoTests(unittest.TestCase):
         self.assertIn('h.update(include_bytes!("shader_cache.rs"))', source)
         self.assertIn("saved.as_slice() == fingerprint", source)
 
+    def test_actual_build_fixture_wiring(self):
+        source = postimage()
+        fixture = source.split("fn actual_build_memo_modes_and_tls_fallback()", 1)[1].split(
+            "fn oversized_fingerprint_is_not_retained()", 1)[0]
+        self.assertIn('matches!(mode.as_str(), "0" | "1")', fixture)
+        self.assertIn("Restore(view_heap_limit())", fixture)
+        self.assertIn("set_view_heap_limit(64)", fixture)
+        self.assertIn("set_view_heap_limit(128)", fixture)
+        self.assertIn("let held = m.borrow_mut()", fixture)
+        self.assertIn("assert_eq!(held.last, previous)", fixture)
+        self.assertIn("assert_eq!(b, reference())", fixture)
+        self.assertIn("scope.spawn", fixture)
+        self.assertIn("assert_eq!(m.borrow().last.is_some(), enabled)", fixture)
+        self.assertNotIn("set_var(", fixture)
+        self.assertNotIn("emit::translate(", fixture)
+        self.assertIn('#[ignore = "fresh process;', source)
+
     @unittest.skipUnless(shutil.which("rustc"), "Rust compiler unavailable")
     def test_extracted_memo_logic(self):
         source = postimage().split("const BUILD_MEMO_MAX:", 1)[1].split("thread_local!", 1)[0]
