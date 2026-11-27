@@ -85,6 +85,25 @@ class FrameReportTests(unittest.TestCase):
         self.assertEqual(actual["frame_ms_percentiles"]["p50"], 20)
         self.assertNotIn("private", str(result))
 
+    def test_30_fps_budget_and_actual_present_rate(self):
+        batch = "frame times: 3 frames in 0.1 s: shortest 10 ms, median 30, longest 60; 0 long (over 100 ms, the usual frame of the last 64 being 20); each: 10 30 60"
+        report = summarize([sample(33), sample(34), sample(20, 1), batch], target_fps=30)
+        self.assertAlmostEqual(report["target_frame_ms"], 1000 / 30, places=5)
+        self.assertEqual(report["intervals_at_or_below_target"], 2)
+        self.assertEqual(report["intervals_meeting_target_without_reported_drops"], 1)
+        actual = report["individual_frame_times"]
+        self.assertEqual(actual["approx_present_fps"], 30)
+        self.assertEqual(actual["frames_within_target_ms"], 2)
+        self.assertEqual(compare(report, report)["approx_present_fps_ratio"], 1)
+        for value in (0, -1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                summarize([], target_fps=value)
+
+    def test_hotpath_counters(self):
+        result = summarize(["mapping diff run totals runs=4 pages=16", "texture view estimate hits hits=8"])
+        self.assertEqual(result["latest_cumulative_counters"]["mapping diff run totals"]["pages"], 16)
+        self.assertEqual(result["latest_cumulative_counters"]["texture view estimate hits"]["hits"], 8)
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

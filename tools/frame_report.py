@@ -3,7 +3,7 @@
 """Summarize only numerical frame telemetry; never upload or echo source logs."""
 import argparse
 import json
-from math import ceil
+from math import ceil, isfinite
 from pathlib import Path
 import re
 from statistics import median
@@ -77,6 +77,8 @@ COUNTERS = {
     "mapping diff totals": ("calls", "saved", "mapped", "scatter"),
     "texture short-lock totals": ("calls", "bytes", "copy_us", "unlocked_us", "retries"),
     "unchanged physical mapping requests skipped": ("count",),
+    "mapping diff run totals": ("runs", "pages"),
+    "texture view estimate hits": ("hits",),
 }
 def update_counters(latest, line):
     for message, fields in COUNTERS.items():
@@ -90,7 +92,10 @@ def update_counters(latest, line):
         if len(values) == len(fields):
             latest[message] = values
 
-def summarize(lines, skip=0, skip_frame_batches=0):
+def summarize(lines, skip=0, skip_frame_batches=0, target_fps=10):
+    if not isfinite(target_fps) or not 0.001 <= target_fps <= 10000:
+        raise ValueError("target_fps must be finite and between 0.001 and 10000")
+    target_ms = 1000 / target_fps
     rows = []
     seen = 0
     remaps, aliases, long_frames = [], [], []
@@ -132,12 +137,15 @@ def summarize(lines, skip=0, skip_frame_batches=0):
                 rows.append(row)
     actual = {
         "samples": len(individual_frames),
+        "duration_ms_rounded_samples": sum(individual_frames),
+        "approx_present_fps": round(1000 * len(individual_frames) / sum(individual_frames), 3) if sum(individual_frames) else None,
+        "frames_within_target_ms": sum(ms <= target_ms for ms in individual_frames),
         "batches_skipped": min(batches_seen, skip_frame_batches),
         "batches_used": max(0, batches_seen - skip_frame_batches),
         "invalid_batches": invalid_batches,
         "frame_ms_percentiles": {f"p{p}": percentile(individual_frames, p / 100) for p in (50, 90, 95, 99)},
         "max_ms": max(individual_frames, default=None),
-        "note": "Individual present-to-present durations rounded to integer milliseconds. Independent of interval warmup and drop counts; not proof of correct rendering.",
+        "note": "Individual present-to-present durations rounded to integer milliseconds. Approximate present FPS is sample count divided by the sum of rounded durations, not verified visible gameplay FPS. Independent of interval warmup and drop counts.",
     }
     detailed = {"individual_frame_times": actual, "latest_cumulative_counters": cumulative,
                 "long_frame_samples": len(remaps), "long_frame_remapping": stats(remaps),
@@ -151,14 +159,15 @@ def summarize(lines, skip=0, skip_frame_batches=0):
     return {
         "samples": len(rows),
         **detailed,
-        "intervals_meeting_target_without_reported_drops": sum(row["frame"] <= 100 and row["dropped"] == 0 and row["compiling"] == 0 for row in rows),
+        "intervals_meeting_target_without_reported_drops": sum(row["frame"] <= target_ms and row["dropped"] == 0 and row["compiling"] == 0 for row in rows),
         "median_reported_interval": med,
         "reported_interval_frame_ms_percentiles": {f"p{p}": percentile([row["frame"] for row in rows], p / 100) for p in (50, 90, 95, 99)},
         "fps_milestones": {str(fps): {"intervals": sum(row["frame"] <= 1000 / fps for row in rows),
             "without_reported_drops_or_pending": sum(row["frame"] <= 1000 / fps and row["dropped"] == 0 and row["compiling"] == 0 for row in rows)} for fps in (5, 10, 20, 30, 60)},
-        "target_frame_ms": 100,
-        "frame_ms_above_target": round(max(0, frame - 100), 3),
-        "intervals_at_or_below_target": sum(row["frame"] <= 100 for row in rows),
+        "target_fps": target_fps,
+        "target_frame_ms": round(target_ms, 6),
+        "frame_ms_above_target": round(max(0, frame - target_ms), 3),
+        "intervals_at_or_below_target": sum(row["frame"] <= target_ms for row in rows),
         "intervals_with_dropped_draws": sum(row["dropped"] > 0 for row in rows),
         "note": "Interval averages, not per-frame percentiles; stage timings can overlap. Visual correctness must be verified separately."
     }
@@ -168,7 +177,16 @@ def compare(baseline, candidate):
     if not baseline["samples"] or not candidate["samples"]:
         return {"status": "insufficient samples"}
     a, b = baseline["median_reported_interval"], candidate["median_reported_interval"]
+    base_frames = baseline["individual_frame_times"]
+    cand_frames = candidate["individual_frame_times"]
+    base_fps = base_frames["approx_present_fps"]
+    cand_fps = cand_frames["approx_present_fps"]
     return {
+        "baseline_approx_present_fps": base_fps,
+        "candidate_approx_present_fps": cand_fps,
+        "approx_present_fps_ratio": round(cand_fps / base_fps, 3) if base_fps and cand_fps is not None else None,
+        "baseline_individual_frame_samples": base_frames["samples"],
+        "candidate_individual_frame_samples": cand_frames["samples"],
         "baseline_samples": baseline["samples"],
         "candidate_samples": candidate["samples"],
         "median_frame_ms_delta": round(b["frame"] - a["frame"], 3),
@@ -185,15 +203,18 @@ def main():
     parser.add_argument("--baseline", type=Path, help="optional comparison log for the same workload")
     parser.add_argument("--skip", type=int, default=0, help="ignore initial matching FPS intervals")
     parser.add_argument("--skip-frame-batches", type=int, default=0, help="independently ignore initial detailed frame batches")
+    parser.add_argument("--target-fps", type=float, default=10, help="frame budget target (use 30 for the roadmap goal)")
     args = parser.parse_args()
+    if not isfinite(args.target_fps) or not 0.001 <= args.target_fps <= 10000:
+        parser.error("--target-fps must be finite and between 0.001 and 10000")
     if args.skip < 0 or args.skip_frame_batches < 0:
         parser.error("warmup counts must be nonnegative")
     try:
         with args.log.open(encoding="utf-8", errors="replace") as handle:
-            report = summarize(handle, args.skip, args.skip_frame_batches)
+            report = summarize(handle, args.skip, args.skip_frame_batches, args.target_fps)
         if args.baseline:
             with args.baseline.open(encoding="utf-8", errors="replace") as handle:
-                report["comparison"] = compare(summarize(handle, args.skip, args.skip_frame_batches), report)
+                report["comparison"] = compare(summarize(handle, args.skip, args.skip_frame_batches, args.target_fps), report)
     except OSError:
         print(json.dumps({"samples": 0, "status": "log unavailable"}))
         return 1

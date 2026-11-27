@@ -8,7 +8,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 
 | ID | Origin | Status | Outstanding work / acceptance evidence |
 | --- | --- | --- | --- |
-| P01 | 1 | Open | Compile the paired-wave candidate, run phase 1–6 tests on Windows and Proton, including aliases, partial failures, concurrent readers and replay. Record real results. |
+| P01 | 1 | Candidate | All 21 selected Windows suite invocations and both build profiles passed at 8956a8e. Newer preflight revision and Proton gameplay, native/Proton comparisons and additional failure fixtures remain open. |
 | P02 | 1 | Candidate | Local repeat-pair numeric benchmark aggregator added. Actual matched gameplay runs, CPU/GPU utilization, frame-level tails and native Windows versus Proton comparison remain open. |
 | P03 | 1 | Candidate | Numeric report adds interval percentiles, selected long-frame and omitted counts, and FPS milestones. Also reports latest cumulative mapping/snapshot counters and actual rounded individual frame distributions from detailed frame batches. Critical-path attribution and real workload verification remain open. |
 | P04 | 2 | Open | Software-only GPU tile page mappings; audit direct CPU dereferences, preserve CPU-visible aliases and validate copy/readback ownership. |
@@ -26,18 +26,18 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P16 | 5 | Open | Unsupported shader operations, paired-wave semantics, waterfall loops, FidelityFX descriptor mutation, missing pipeline methods; ensure scene rendering correctness. |
 | P17 | 5 | Candidate | Process-local cache save serialization and retry bookkeeping, optional bounded requested-graphics bursts and compiler worker count implemented. Persistent shader cache key coverage, cross-process cache ownership, compile worker stability, native-wave specialization and dropped draws remain open; validate. |
 | P18 | 6 | Candidate | Opt-in paired-wave DirectStorage worker cap implemented. Descriptor/command list caching, release/PGO evaluation, native Linux backend feasibility and measured worker tuning remain open. |
-| P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Actual compile and end-to-end results, and other runtime variant ports remain open. |
+| P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Both build profiles passed at 8956a8e; current-head validation, end-to-end gameplay and other runtime variant ports remain open. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
 | P21 | 4 | Candidate | Independent Linux CI compiled the actual prepared scalar/AVX2, sparse merge and idle budget helpers; five tests passed in each of two switch modes. Runtime mask paths, GPU integration, CPU/RAM/transfer telemetry and real benchmarks remain open. |
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
 | P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
-| P24 | 6 | Open | Repair any remaining compile/CI failures; verify the builder anchor fix and all cumulative source patches on pinned checkouts. |
+| P24 | 6 | Candidate | Prior Windows split/restore and partial-source regression failures resolved at 8956a8e; complete Windows validation passed. Newer preflight and isolated hot-path runtime CI remain pending; do not close until current integration is verified. |
 
 ## Current state
 
 Phases 1 and 2: opt-in implementation candidates committed. Earlier Windows
 runs compiled the HLE test executable but failed the split/restore regression;
-full release/diagnostic compilation and gameplay remain unverified.
+both profiles and selected Windows suites subsequently passed at 8956a8e; gameplay remains unverified.
 Phase 3: short-lock snapshot candidate and standalone range-gate prototype.
 The global mapping lock remains the production safety mechanism.
 Phase 4: opt-in GPU copy-back scan/merge and idle snapshot budget candidates;
@@ -112,3 +112,8 @@ P06: checked unmap candidate preserves the HLE view index on host unmap refusal,
 
 - [Hot-path synthetic CI 45938587709](https://github.com/larbob1/emulard/actions/runs/45938587709) at `2871877b1e30a6c41882c6e577aa53fac0469365` passed 108 Python, four range-gate and ten portable copy-helper test executions. Full runtime checks pending.
 - P06/P24: default direct mapping now preflights the entire physical request in one pass, grouping contiguous backing slices before unmapping. An unknown final ID cannot destroy the destination, regardless of experimental flags. Existing native map/unmap failures remain nontransactional; valid requests retain original mapping and fallback behavior. The earlier alias-byte assertion now identifies the exact synthetic step and page in sanitized CI. All four source anchors verified against reconstructed prepared xmem. This is not a verified resolution of the alias mismatch; runtime tests pending.
+
+### First complete Windows validation and playtest readiness
+
+- [Windows CI 45937702602](https://github.com/larbob1/emulard/actions/runs/45937702602) at `8956a8e3a3f847a2e7959ac17623debc11a1da6c` passed all 21 selected suite invocations (including all four physical-page modes, concurrent reads and tile replay) and both release/diagnostic builds. This verifies the earlier partial-source correction in the tested native Windows suites, not Proton gameplay. Use this exact revision for the first controlled playtest after smoke checks. [Newer preflight runtime CI](https://github.com/larbob1/emulard/actions/runs/45938913428) and hot-path native validation remain separate. No item closed; all 24 IDs retained.
+- P02/P03/P20: report now supports `--target-fps 30`, approximate present rate derived from rounded individual durations, independent sample counts, and the new hot-path counters. Default target remains 10 for backward compatibility. A present is not proof of a correctly displayed frame; operator visual checks and repeated runs remain required. New report tests are pending CI.
