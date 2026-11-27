@@ -88,6 +88,23 @@ class CpuTraceReportTests(unittest.TestCase):
         self.assertEqual(r["rejection_reasons"], {"capture_limit": 1})
         self.assertIsNone(r["aggregate"])
 
+    def test_terminal_receipt_and_truncation(self):
+        a = window()
+        end = {"schema": "cpu_trace_end_v1", "code": 1, "expected": 1,
+               "attempted": 1, "drained": 1, "written": 1,
+               "invalid_windows": 0, "dropped_windows": 0, "complete": True}
+        def strict(*rows):
+            return summarize([json.dumps(r) for r in rows], require_terminal=True)
+        self.assertTrue(strict(a, end)["terminal_verified"])
+        self.assertFalse(strict(a)["all_supplied_records_usable"])
+        self.assertFalse(strict(a, end, end)["terminal_verified"])
+        self.assertFalse(strict(end, a)["terminal_verified"])
+        for k, v in (("expected", 2), ("written", 0), ("complete", False),
+                     ("code", 5), ("dropped_windows", 1), ("invalid_windows", True)):
+            bad = dict(end, **{k: v})
+            self.assertIsNone(strict(a, bad)["aggregate"])
+        self.assertFalse(report(a)["terminal_verified"])
+
     def test_privacy_and_cli(self):
         a = window()
         a["private_path"] = "/private/synthetic-path"

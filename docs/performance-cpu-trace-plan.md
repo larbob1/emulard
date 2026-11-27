@@ -142,3 +142,28 @@ The prototype has no runtime timestamp calls, no production flags, no writer,
 and no actual runtime source changes. Compiled tests cover real-thread overlap
 and contention plus stale epochs, disabled path, caps, thread changes and
 bounded drain. CPU observation is not displayed-frame or GPU completion timing.
+
+## Terminal handshake and writer prototype
+
+A producer admission gate closes on stop and waits for already admitted
+operations to retire before terminal receipt construction. Outstanding
+non-present tickets at a window boundary stop capture rather than certify an
+incomplete window. One writer lease at a time is allowed; write_next performs
+write and flush outside the capture lock and acknowledges the sequence only
+on success. A failed write or flush leaves the capture unpublishable.
+No runtime writer thread or filesystem publication has been installed.
+A terminal receipt uses schema cpu_trace_end_v1 with numeric code (1 = cap),
+expected, attempted, drained, written, invalid_windows, dropped_windows and
+boolean complete. Clean receipt requires all counts equal to capture cap,
+zero invalid/dropped and no outstanding tickets. For production, use a single
+writer, emit and flush the footer only after quiescence, and publish a new
+local file only after success (temporary file + successful close/rename;
+flush alone is not disk durability). No footer on write failure.
+
+    python3 tools/cpu_trace_report.py local-cpu-trace.jsonl --require-terminal
+
+Strict mode requires the matching receipt as final record. Legacy mode remains
+for synthetic fixtures/structural analysis, explicitly terminal_verified false
+without a receipt. This is count/structure validation, not proof of capture
+provenance, clock accuracy, storage durability or visual FPS. The prototype
+still has no runtime hooks or approved shared registration.

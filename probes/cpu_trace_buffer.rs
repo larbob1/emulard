@@ -231,6 +231,13 @@ const CONCURRENT_PRESENT: u8 = 3;
 const STALE_TICKET: u8 = 4;
 const CONTENDED: u8 = 5;
 const EXHAUSTED: u8 = 6;
+const WRITER_FAILED: u8 = 7;
+const CLOSED: u64 = 1 << 63;
+
+struct Admission<'a>(&'a AtomicU64);
+impl Drop for Admission<'_> {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::AcqRel); }
+}
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -265,6 +272,9 @@ struct SharedCapture {
     pending: VecDeque<Capture>,
     attempted: u64,
     drained: u64,
+    written: u64,
+    writer_inflight: Option<u64>,
+    outstanding: u64,
     invalid_windows: u64,
     dropped_windows: u64,
 }
@@ -275,17 +285,29 @@ struct Controller {
     cap: u64,
     queue_cap: usize,
     stop: AtomicU8,
+    admission: AtomicU64,
     state: Mutex<SharedCapture>,
 }
 
 #[derive(Debug)]
 struct Terminal {
     code: u8,
+    expected: u64,
     attempted: u64,
     drained: u64,
+    written: u64,
     invalid_windows: u64,
     dropped_windows: u64,
     complete: bool,
+}
+
+impl Terminal {
+    fn json(&self) -> String {
+        format!(concat!(r#"{{"schema":"cpu_trace_end_v1","code":{},"expected":{},"attempted":{},"#,
+                        r#""drained":{},"written":{},"invalid_windows":{},"dropped_windows":{},"complete":{}}}"#),
+                self.code, self.expected, self.attempted, self.drained, self.written,
+                self.invalid_windows, self.dropped_windows, self.complete)
+    }
 }
 
 impl Controller {
@@ -297,9 +319,11 @@ impl Controller {
             cap: cap.clamp(1, 600),
             queue_cap: queue_cap.clamp(1, 8),
             stop: AtomicU8::new(if enabled && session == 0 { EXHAUSTED } else { RUNNING }),
+            admission: AtomicU64::new(if enabled && session == 0 { CLOSED } else { 0 }),
             state: Mutex::new(SharedCapture {
                 buffer: Buffer::new(span_cap), epoch: 1, present: None,
                 pending: VecDeque::new(), attempted: 0, drained: 0,
+                written: 0, writer_inflight: None, outstanding: 0,
                 invalid_windows: 0, dropped_windows: 0,
             }),
         }
@@ -313,6 +337,15 @@ impl Controller {
         // A late, racing loss report must not be hidden by a cap-reached
         // status. Fault status is sticky; exact loss count may be unknown.
         self.stop.fetch_max(code, Ordering::AcqRel);
+        self.admission.fetch_or(CLOSED, Ordering::AcqRel);
+    }
+
+    fn admit(&self) -> Option<Admission<'_>> {
+        if !self.observing() { return None; }
+        self.admission.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            if n >= CLOSED - 1 { None } else { Some(n + 1) }
+        }).ok()?;
+        Some(Admission(&self.admission))
     }
 
     fn producer_state(&self) -> Option<MutexGuard<'_, SharedCapture>> {
@@ -326,6 +359,7 @@ impl Controller {
 
     fn begin(&self, kind: Kind, start_ns: u64) -> Option<Ticket> {
         // Disabled/stopped calls do not touch TLS or lock capture state.
+        let _admitted = self.admit()?;
         let mut state = self.producer_state()?;
         let local = LOCAL.with(|cell| {
             let mut l = cell.get();
@@ -346,11 +380,16 @@ impl Controller {
         } else if state.buffer.owner != Some(local.thread) {
             return None; // Not the presenting thread; no span retained.
         }
+        if kind != Kind::PresentCall {
+            if state.outstanding >= 256 { self.fail(EXHAUSTED); return None; }
+            state.outstanding += 1;
+        }
         Some(Ticket { session: self.session, thread: local.thread,
                       epoch: local.epoch, start_ns, kind, _local: PhantomData })
     }
 
     fn finish(&self, ticket: Ticket, end_ns: u64, present_ok: bool) {
+        let Some(_admitted) = self.admit() else { return; };
         let Some(mut state) = self.producer_state() else { return; };
         let local_ok = LOCAL.with(|cell| {
             let l = cell.get();
@@ -376,7 +415,12 @@ impl Controller {
         state.buffer.record(ticket.thread, Span {
             kind: ticket.kind, start_ns: ticket.start_ns, end_ns,
         });
-        if !is_present { return; }
+        if !is_present {
+            if state.outstanding == 0 { self.fail(STALE_TICKET); return; }
+            state.outstanding -= 1;
+            return;
+        }
+        if state.outstanding != 0 { self.fail(STALE_TICKET); return; }
         let row = state.buffer.finish(ticket.thread, end_ns, present_ok);
         let Some(next_epoch) = state.epoch.checked_add(1) else {
             self.fail(EXHAUSTED);
@@ -398,26 +442,53 @@ impl Controller {
         }
     }
 
-    // Ownership of one record leaves the lock before formatting or I/O.
-    // Actual integration must limit external consumer retention to one record
-    // and acknowledge successful writes before certifying terminal status.
+    // Single writer lease; no further pop before write/flush acknowledgement.
     fn pop(&self) -> Option<Capture> {
         let mut state = self.state.try_lock().ok()?;
+        if state.writer_inflight.is_some() || self.stop.load(Ordering::Acquire) == WRITER_FAILED {
+            return None;
+        }
         let row = state.pending.pop_front()?;
         state.drained += 1;
+        state.writer_inflight = Some(row.sequence);
         Some(row)
+    }
+
+    fn acknowledge(&self, sequence: u64, success: bool) {
+        // Writer thread only: never called by a runtime producer.
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.writer_inflight != Some(sequence) || !success {
+            self.fail(WRITER_FAILED);
+            return;
+        }
+        state.writer_inflight = None;
+        state.written += 1;
+    }
+
+    fn write_next(&self, output: &mut impl std::io::Write) -> std::io::Result<bool> {
+        let Some(row) = self.pop() else { return Ok(false); };
+        let result = writeln!(output, "{}", row.json()).and_then(|_| output.flush());
+        self.acknowledge(row.sequence, result.is_ok());
+        result.map(|_| true)
     }
 
     fn terminal(&self) -> Option<Terminal> {
         let state = self.state.try_lock().ok()?;
+        // Closed admission plus zero active operations ensures a producer
+        // that observed RUNNING earlier cannot publish a later fault.
+        if self.admission.load(Ordering::Acquire) != CLOSED { return None; }
         let code = self.stop.load(Ordering::Acquire);
-        if code == RUNNING || !state.pending.is_empty() { return None; }
+        if code == RUNNING || !state.pending.is_empty() || state.writer_inflight.is_some() {
+            return None;
+        }
         Some(Terminal {
-            code, attempted: state.attempted, drained: state.drained,
+            code, expected: self.cap, attempted: state.attempted, drained: state.drained,
+            written: state.written,
             invalid_windows: state.invalid_windows, dropped_windows: state.dropped_windows,
             complete: code == CAP_REACHED && state.attempted == self.cap
-                && state.drained == self.cap && state.invalid_windows == 0
-                && state.dropped_windows == 0,
+                && state.written == self.cap && state.drained == self.cap
+                && state.outstanding == 0 && state.present.is_none()
+                && state.invalid_windows == 0 && state.dropped_windows == 0,
         })
     }
 }
@@ -426,6 +497,12 @@ impl Controller {
 mod controller_tests {
     use super::*;
     use std::sync::Barrier;
+
+    fn drain(c: &Controller) -> Option<Capture> {
+        let row = c.pop()?;
+        c.acknowledge(row.sequence, true);
+        Some(row)
+    }
 
     fn present(c: &Controller, start: u64, end: u64) {
         let t = c.begin(Kind::PresentCall, start).unwrap();
@@ -452,10 +529,10 @@ mod controller_tests {
         present(&c, 29, 30);
         assert!(c.begin(Kind::PresentCall, 31).is_none());
         assert!(c.terminal().is_none());
-        let first = c.pop().unwrap();
+        let first = drain(&c).unwrap();
         assert!(first.cpu_window_complete);
         assert_eq!(first.spans.len(), 2);
-        assert_eq!(c.pop().unwrap().sequence, 2);
+        assert_eq!(drain(&c).unwrap().sequence, 2);
         let end = c.terminal().unwrap();
         assert!(end.complete);
         assert_eq!(end.code, CAP_REACHED);
@@ -469,8 +546,8 @@ mod controller_tests {
         present(&c, 1, 10);
         present(&c, 11, 20);
         present(&c, 21, 30);
-        assert_eq!(c.pop().unwrap().sequence, 1);
-        assert!(c.pop().is_none());
+        assert_eq!(drain(&c).unwrap().sequence, 1);
+        assert!(drain(&c).is_none());
         let end = c.terminal().unwrap();
         assert_eq!(end.code, QUEUE_FULL);
         assert_eq!(end.dropped_windows, 1);
@@ -485,7 +562,7 @@ mod controller_tests {
         let old = c.begin(Kind::Execute, 11).unwrap();
         present(&c, 19, 20);
         c.finish(old, 21, true);
-        c.pop().unwrap();
+        assert!(drain(&c).is_none());
         assert_eq!(c.terminal().unwrap().code, STALE_TICKET);
         assert!(!c.terminal().unwrap().complete);
     }
@@ -507,7 +584,7 @@ mod controller_tests {
             assert!(c.begin(Kind::PresentCall, 12).is_none());
             checked.wait();
         });
-        assert!(c.pop().is_none());
+        assert!(drain(&c).is_none());
         assert_eq!(c.terminal().unwrap().code, CONCURRENT_PRESENT);
     }
 
@@ -522,10 +599,10 @@ mod controller_tests {
                 present(&c, 29, 30);
             }).join().unwrap();
         });
-        let first = c.pop().unwrap();
+        let first = drain(&c).unwrap();
         assert!(first.thread_changed);
         assert!(!first.cpu_window_complete);
-        assert!(c.pop().unwrap().cpu_window_complete);
+        assert!(drain(&c).unwrap().cpu_window_complete);
         let end = c.terminal().unwrap();
         assert_eq!(end.invalid_windows, 1);
         assert!(!end.complete);
@@ -559,5 +636,89 @@ mod controller_tests {
         assert_eq!(c.cap, 600);
         assert_eq!(c.queue_cap, 8);
         assert_eq!(c.state.lock().unwrap().buffer.capacity, 256);
+    }
+
+    #[test]
+    fn terminal_waits_for_admitted_producer() {
+        let c = Controller::new(true, 1, 1, 8);
+        present(&c, 1, 10);
+        let active = c.admit().unwrap();
+        present(&c, 19, 20);
+        drain(&c).unwrap();
+        assert!(c.terminal().is_none());
+        c.fail(CONTENDED);
+        drop(active);
+        assert_eq!(c.terminal().unwrap().code, CONTENDED);
+        assert!(!c.terminal().unwrap().complete);
+    }
+
+    #[test]
+    fn terminal_waits_for_writer_ack_and_refuses_second_lease() {
+        let c = Controller::new(true, 2, 2, 8);
+        present(&c, 1, 10);
+        present(&c, 19, 20);
+        present(&c, 29, 30);
+        let a = c.pop().unwrap();
+        assert!(c.pop().is_none());
+        assert!(c.terminal().is_none());
+        c.acknowledge(a.sequence, true);
+        let b = c.pop().unwrap();
+        assert!(c.terminal().is_none());
+        c.acknowledge(b.sequence, true);
+        let end = c.terminal().unwrap();
+        assert!(end.complete);
+        assert_eq!(end.written, 2);
+        assert!(end.json().contains(r#""schema":"cpu_trace_end_v1""#));
+    }
+
+    #[test]
+    fn actual_writer_and_flush_failure() {
+        struct Broken(bool);
+        impl std::io::Write for Broken {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.0 { Ok(bytes.len()) } else { Err(std::io::ErrorKind::Other.into()) }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::Other.into())
+            }
+        }
+        for fail_at_flush in [false, true] {
+            let c = Controller::new(true, 1, 1, 8);
+            present(&c, 1, 10);
+            present(&c, 19, 20);
+            assert!(c.write_next(&mut Broken(fail_at_flush)).is_err());
+            assert!(c.terminal().is_none());
+            assert_eq!(c.stop.load(Ordering::Acquire), WRITER_FAILED);
+            assert!(c.pop().is_none());
+        }
+        let c = Controller::new(true, 1, 1, 8);
+        present(&c, 1, 10);
+        present(&c, 19, 20);
+        let mut bytes = Vec::new();
+        assert!(c.write_next(&mut bytes).unwrap());
+        assert!(String::from_utf8(bytes).unwrap().contains("cpu_trace_v1"));
+        assert!(c.terminal().unwrap().complete);
+    }
+
+    #[test]
+    fn abandoned_ticket_refuses_clean_cap() {
+        let c = Controller::new(true, 1, 1, 8);
+        present(&c, 1, 10);
+        drop(c.begin(Kind::Execute, 11).unwrap());
+        present(&c, 19, 20);
+        assert!(!c.terminal().unwrap().complete);
+        assert_eq!(c.terminal().unwrap().code, STALE_TICKET);
+    }
+
+    #[test]
+    fn full_600_window_capture() {
+        let c = Controller::new(true, 600, 1, 8);
+        present(&c, 1, 10);
+        for i in 1..=600 {
+            present(&c, i*10+1, i*10+10);
+            assert_eq!(drain(&c).unwrap().sequence, i);
+        }
+        assert!(c.terminal().unwrap().complete);
+        assert_eq!(c.terminal().unwrap().written, 600);
     }
 }

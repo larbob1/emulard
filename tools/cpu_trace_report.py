@@ -74,21 +74,28 @@ def tails(values):
             "max_ms": values[-1] / 1e6}
 
 
-def summarize(lines):
+def summarize(lines, require_terminal=False):
     reasons = Counter()
     sequence_issues = Counter()
     valid = []
     previous_sequence, previous_end = 0, None
     records = 0
+    receipt = None
     for line in lines:
         if not line.strip():
             continue
-        records += 1
-        if records > MAX_WINDOWS:
-            reasons["capture_limit"] += 1
+        if receipt is not None:
+            reasons["after_terminal"] += 1
             break
         try:
             record = json.loads(line)
+            if isinstance(record, dict) and record.get("schema") == "cpu_trace_end_v1":
+                receipt = record
+                continue
+            records += 1
+            if records > MAX_WINDOWS:
+                reasons["capture_limit"] += 1
+                break
             row = analyze(record)
             seq, start, end = record["sequence"], record["start_ns"], record["end_ns"]
             if seq != previous_sequence + 1:
@@ -104,6 +111,21 @@ def summarize(lines):
             reason = str(exc)
             reasons[reason if reason in REASONS else "malformed_record"] += 1
 
+    terminal_ok = False
+    if receipt is not None:
+        counts = ("code", "expected", "attempted", "drained", "written",
+                  "invalid_windows", "dropped_windows")
+        terminal_ok = (all(uint(receipt.get(k)) for k in counts)
+                       and receipt.get("complete") is True
+                       and receipt["code"] == 1
+                       and 1 <= receipt["expected"] <= MAX_WINDOWS
+                       and receipt["expected"] == receipt["attempted"] == receipt["drained"]
+                       == receipt["written"] == records == len(valid)
+                       and receipt["invalid_windows"] == receipt["dropped_windows"] == 0)
+        if not terminal_ok:
+            reasons["invalid_terminal"] += 1
+    elif require_terminal:
+        reasons["missing_terminal"] += 1
     usable = bool(valid) and not reasons and not sequence_issues
     aggregate = None
     if usable:
@@ -123,22 +145,26 @@ def summarize(lines):
     return {"records_examined": records, "structurally_valid_windows": len(valid),
             "rejected_records": sum(reasons.values()), "rejection_reasons": dict(sorted(reasons.items())),
             "sequence_issues": dict(sorted(sequence_issues.items())),
-            "all_supplied_records_usable": usable, "aggregate": aggregate,
+            "all_supplied_records_usable": usable, "terminal_verified": usable and terminal_ok,
+            "aggregate": aggregate,
             "note": "Selected outer presenting-thread call elapsed time only, including nested waits/work. "
                     "Not CPU busy time, display completion, GPU time, dependency attribution or visible FPS. "
                     "Fractions are elapsed-weighted; per-window tails include zero when a kind was absent. "
                     "Unattributed time is not necessarily idle. Completeness is producer-attested; "
-                    "missing trailing records and uninstrumented calls cannot be detected. "
+                    "A verified terminal checks declared counts; legacy mode cannot detect missing trailing records. "
+                    "Uninstrumented calls cannot be detected. "
                     "Capture limit stops examination at first excess record. No raw timestamps or IDs exported."}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("trace", type=Path)
+    parser.add_argument("--require-terminal", action="store_true",
+                        help="reject captures without a matching final receipt")
     args = parser.parse_args()
     try:
         with args.trace.open(encoding="utf-8", errors="replace") as handle:
-            report = summarize(handle)
+            report = summarize(handle, require_terminal=args.require_terminal)
     except OSError:
         print(json.dumps({"status": "trace_unavailable"}))
         return 1
