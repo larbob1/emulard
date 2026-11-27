@@ -8,7 +8,7 @@ The [canonical deferred-work register](https://github.com/larbob1/emulard/blob/d
 
 ## Reference configuration and benchmark protocol
 
-Use the owner's RTX 5060 Ti and documented Ryzen 7 3700X system as an initial reference (verify CPU, RAM, VRAM and driver before recording). Use the same authorized local workload, Series S profile, resolution, render scale, graphics settings, OS, Proton/driver version, runtime commit, and cache state. Record the exact actual configuration; no specific resolution is assumed here.
+Start with the RTX 5060 Ti / Series S configuration documented in the compatibility branch's earlier experiments (record actual CPU, RAM, VRAM and driver before testing). Use the same authorized local workload, Series S profile, resolution, render scale, graphics settings, OS, Proton/driver version, runtime commit, and cache state. Record the exact actual configuration; no specific resolution is assumed here.
 
 1. Pass synthetic, Windows runtime, release/diagnostic build and Proton smoke checks.
 2. Choose one repeatable scene with actual world rendering and input; record camera path/actions and fixed warmup. Keep capture off during timing.
