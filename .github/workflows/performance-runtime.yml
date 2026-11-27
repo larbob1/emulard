@@ -2,7 +2,7 @@ name: Paired-wave performance runtime validation
 
 on:
   push:
-    branches: ['dev/performance-phase6']
+    branches: ['dev/performance-phase6', 'dev/performance-phase6-pipeline-stream-eleven-native']
     paths-ignore:
       - 'docs/**'
       - 'README.md'
