@@ -78,19 +78,27 @@ def pinned(path, expected):
 
 
 def listing_ok(output, expected):
-    names = re.findall(r"^([^\r\n]+): test$", output, re.M)
-    counts = re.findall(r"^(\d+) tests?, (\d+) benchmarks?$", output, re.M)
-    return bool(expected and len(names) == len(expected) and
-                set(names) == expected and counts == [(str(len(expected)), "0")])
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not expected or len(lines) != len(expected) + 1:
+        return False
+    names = [re.fullmatch(r"(\S+): test", line) for line in lines[:-1]]
+    return (all(names) and {m.group(1) for m in names} == expected
+            and re.fullmatch(rf"{len(expected)} tests?, 0 benchmarks?", lines[-1]) is not None)
 
 
 def receipt_ok(output, expected):
-    names = re.findall(r"^test (\S+) \.\.\. ok$", output, re.M)
-    totals = re.findall(
-        r"^test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored; "
-        r"(\d+) measured; (\d+) filtered out;", output, re.M)
-    return bool(expected and len(names) == len(expected) and set(names) == expected
-                and totals == [(str(len(expected)), "0", "0", "0", "0")])
+    lines = [line for line in output.splitlines() if line.strip()]
+    if not expected or len(lines) not in (len(expected) + 1, len(expected) + 2):
+        return False
+    if lines[0] == f"running {len(expected)} test" or lines[0] == f"running {len(expected)} tests":
+        lines = lines[1:]
+    if len(lines) != len(expected) + 1:
+        return False
+    names = [re.fullmatch(r"test (\S+) \.\.\. ok", line) for line in lines[:-1]]
+    summary = (rf"test result: ok\. {len(expected)} passed; 0 failed; 0 ignored; "
+               r"0 measured; 0 filtered out; finished in \d+(?:\.\d+)?s")
+    return (all(names) and {m.group(1) for m in names} == expected
+            and re.fullmatch(summary, lines[-1]) is not None)
 
 
 def command(args, cwd, timeout):
@@ -133,7 +141,7 @@ def run_case(case, source_path, checkout, rustc, directory):
         raise ValueError("preview did not preserve original bytes")
     expected = case.baseline | {case.candidate}
     count = run_module(output, directory, rustc, expected)
-    return count
+    return count, blob(generated)
 
 
 def main(argv=None):
@@ -158,18 +166,29 @@ def main(argv=None):
     except (OSError, ValueError):
         print("INVALID: source/proposal identity could not be verified")
         return 2
-    print("upstream_pin=" + UPSTREAM)
+    try:
+        compiler = command([rustc, "-vV"], Path.cwd(), 30)
+        host = re.findall(r"^host: (\S+)$", compiler, re.M)
+        release = re.findall(r"^release: (\S+)$", compiler, re.M)
+        if len(host) != 1 or len(release) != 1:
+            raise ValueError("compiler identity missing")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        print("INVALID: compiler identity unavailable")
+        return 2
+    print("compiler_release=" + release[0] + " default_target=" + host[0])
+    print("upstream_manifest_pin=" + UPSTREAM)
+    print("identity_scope=pinned_relevant_blobs_not_verified_checkouts")
     with tempfile.TemporaryDirectory(prefix="ai0-module-parity-") as temp:
         for case in CASES:
             directory = Path(temp) / case.label
             directory.mkdir()
             path = a.texture if case.source_pin == TEXTURE_PIN else a.primitive
             try:
-                count = run_case(case, path, getattr(a, case.label), rustc, directory)
+                count, generated_blob = run_case(case, path, getattr(a, case.label), rustc, directory)
             except (OSError, ValueError, subprocess.TimeoutExpired):
                 print(case.label + " FAILED: no complete verified receipt")
                 return 1
-            print(f"{case.label} head={case.head} source_blob={case.source_pin} "
+            print(f"{case.label} manifest_head={case.head} source_blob={case.source_pin} generated_blob={generated_blob} "
                   f"passed={count} candidate={case.candidate}")
     print("All three isolated raw-module suites passed; not native GPU/runtime acceptance")
     return 0
