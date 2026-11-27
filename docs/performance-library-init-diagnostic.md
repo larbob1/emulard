@@ -28,3 +28,5 @@ Native filter library_init_diagnostic_tests, expected four; test both
 profiles and actual failure paths if feasible. AI3 schema review and AI1
 native/local approval required. Do not launch another prolonged game
 test, modify the frozen #18 branch or treat error classification as a fix.
+
+Coordinator isolated native child: register diagnostic-only library_init_diagnostic_tests (four expected) and both builds. No source policy changes. Owner permits bounded protected tests; wait for native suite evidence and schema review before enabling this diagnostic. No formal FPS claim.
