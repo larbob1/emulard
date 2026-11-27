@@ -15,16 +15,22 @@ class StorageScratchReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "storage-scratch-tests"
             compiled = subprocess.run(
-                ["rustc", "--edition=2021", "--test",
+                ["rustc", "--edition=2021", "--test", "-C", "opt-level=0",
                  str(ROOT / "probes" / "storage_scratch_review.rs"), "-o", str(binary)],
                 capture_output=True, text=True, timeout=60,
             )
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-            result = subprocess.run([str(binary), "--test-threads=1"],
+            result = subprocess.run([str(binary), "--test-threads=1", "--nocapture"],
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertRegex(result.stdout, r"test result: ok\. 7 passed; 0 failed; 0 ignored;")
-            print("Storage scratch Vec review: 7 passed; 0 failed; 0 ignored", flush=True)
+            self.assertRegex(result.stdout, r"test result: ok\. 8 passed; 0 failed; 0 ignored;")
+            rows = [line for line in result.stdout.splitlines()
+                    if "Storage scratch allocator calls:" in line]
+            self.assertEqual(len(rows), 1, result.stdout)
+            row = rows[0][rows[0].index("Storage scratch allocator calls:"):]
+            self.assertRegex(row, r"baseline_acquisitions=100 .*reuse_acquisitions=1 ")
+            print(row, flush=True)
+            print("Storage scratch Vec review: 8 passed; 0 failed; 0 ignored", flush=True)
 
 
 if __name__ == "__main__":
