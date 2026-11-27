@@ -30,6 +30,11 @@ jobs:
           rustc --edition 2024 --test probes/placeholder_hint_tests.rs -o /tmp/emulard-placeholder-tests
           /tmp/emulard-placeholder-tests
 
+      - name: Standalone physical logical accounting model
+        run: |
+          rustc --edition 2024 --test probes/physical_ledger_review.rs -o /tmp/emulard-physical-ledger-tests
+          /tmp/emulard-physical-ledger-tests
+
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
