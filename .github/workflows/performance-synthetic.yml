@@ -29,7 +29,7 @@ jobs:
   portable-copy:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6'
+    if: github.ref == 'refs/heads/dev/performance-phase6' || github.head_ref == 'dev/performance-phase6' || github.ref == 'refs/heads/dev/performance-phase6-hle-pool-native' || github.head_ref == 'dev/performance-phase6-hle-pool-native' || github.ref == 'refs/heads/dev/performance-phase6-hle-retirement-native' || github.head_ref == 'dev/performance-phase6-hle-retirement-native'
     steps:
       - uses: actions/checkout@v4
         with:

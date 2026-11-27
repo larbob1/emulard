@@ -1,3 +1,8 @@
 # Unified-diff context lines encode empty source lines as a single space.
 patches/*.patch whitespace=-blank-at-eol
 patches/*.patch text eol=lf
+# Exact byte pins for native HLE fixture generation.
+probes/hle_pool_native_tests.rs text eol=lf
+probes/hle_idle_native_review.rs text eol=lf
+probes/hle_idle_boundary_review.rs text eol=lf
+probes/hle_idle_cleanup_native.rs text eol=lf
