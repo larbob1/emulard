@@ -31,6 +31,9 @@ rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-test
 /tmp/emulard-range-gate-tests
 ```
 
+The performance candidate synthetic workflow runs the Python patcher and
+standalone Rust range-gate tests on performance branches. The paired-wave
+Windows build also runs the mapping guard and generation fixtures.
 Run the existing xmem and shader fixtures before gameplay testing. The
 standalone prototype tests do not prove runtime correctness. Benchmark
 the exact same warmed scene with `VICTORY_FRAME_LOG=1`, capture disabled,

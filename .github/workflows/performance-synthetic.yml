@@ -1,0 +1,27 @@
+name: Performance candidate synthetic tests
+
+on:
+  push:
+    branches: ['dev/performance-phase*']
+  pull_request:
+    branches: ['dev/performance-phase*', 'dev/compatibility-baseline']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patcher and reporting tests
+        run: python -m unittest discover -s tools -p 'test_*.py'
+      - name: Standalone range gate tests
+        run: |
+          rustc --edition 2021 --test probes/range_gate.rs -o /tmp/emulard-range-gate-tests
+          /tmp/emulard-range-gate-tests
