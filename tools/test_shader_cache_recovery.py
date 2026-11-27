@@ -98,6 +98,8 @@ fn main() {
         "hit" => {
             assert_eq!(cached(&cache, &build, b"x", translate), expected);
             assert_eq!(cached(&cache, &build, b"x", translate), expected);
+            assert!(!reuse_translated_on());
+            assert_eq!(DECODES.load(Ordering::Relaxed), 2);
             assert_eq!(runs.load(Ordering::Relaxed), 1);
             assert_eq!(HITS.load(Ordering::Relaxed), 1);
             assert_eq!(MISSES.load(Ordering::Relaxed), 1);
