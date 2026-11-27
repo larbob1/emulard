@@ -54,3 +54,6 @@ AI4 #27 assigned local evidence collection, with read-only title isolation, supe
 
 ### Single-variable storage candidate
 #29 15778831 derives from frozen #18 and exact #21 lookup patcher/test. Native #25 verified 34/34; #29 synthetic passed 160 executions and pinned prep, native active; #26 active. AI4 initial test order unchanged, optional storage comparison after valid #18 gameplay and clearance. Next: local baseline, native #26/#29, #17 extent snapshot, prepared diagnostic review. No merge/gameplay result.
+
+### P16/P03/P13/P14 follow-up
+#30 de34a244 native active, synthetic passed; #31 be1e4003 exact prepared preview checks passed both jobs. Caller/feature/schema review remains, no production registration. AI4 historical loading/menu exit 3, translator warnings; approved local toolchain in place, exact #18 build in progress per report. Prioritize verified rendering before measuring optimization. Review #26/#29/#30 native and actual #18 launch; texture preparation lead needs matched evidence. No merges or gameplay result.
