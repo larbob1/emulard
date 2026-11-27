@@ -110,7 +110,8 @@ def write_source(path, source, original):
         source = source.replace("\n", "\r\n")
     path.write_bytes(source.encode("utf-8"))
 
-def receipt(output, code, *, baseline=False):
+def receipt(output, code, *, baseline_line=None):
+    baseline = baseline_line is not None
     status = "FAILED" if baseline else "ok"
     expected = f"test {NAME} ... {status}"
     test_lines = re.findall(r"^test \S+ \.\.\. (?:ok|FAILED|ignored.*)$", output, re.M)
@@ -124,17 +125,19 @@ def receipt(output, code, *, baseline=False):
     want = ("FAILED", "0", "1", "0", "0") if baseline else ("ok", "1", "0", "0", "0")
     if summaries[0][:5] != want:
         return False
+    site = rf"shadow\.rs:{baseline_line}:\d+" if baseline else None
     return (code != 0 and "attempt to subtract with overflow" in output
-            if baseline else code == 0)
+            and re.search(site, output) is not None if baseline else code == 0)
 
-def run_exact(target, label, flags=(), *, baseline=False):
+def run_exact(target, label, flags=(), *, baseline_line=None):
+    baseline = baseline_line is not None
     command = ["cargo", "test", "--locked", "-p", "victory-gpu", "--lib",
                *flags, NAME, "--", "--exact", "--test-threads=1"]
     env = dict(os.environ, VICTORY_BACK_AVX2="0", VICTORY_BACK_SPARSE_MERGE="0")
     result = subprocess.run(command, cwd=target, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, errors="replace",
                             timeout=3600)
-    if not receipt(result.stdout, result.returncode, baseline=baseline):
+    if not receipt(result.stdout, result.returncode, baseline_line=baseline_line):
         raise ValueError(f"{label}: missing or unexpected exact native receipt")
     print(f"{label}: {NAME}: " + ("expected overflow reproduced" if baseline else "1 passed; 0 failed"),
           flush=True)
@@ -158,7 +161,8 @@ def main():
             print(f"upstream={revision} prepared_shadow_blob_lf={blob(source.encode())}", flush=True)
             baseline = fixture_source(source, False)
             write_source(path, baseline, original)
-            run_exact(target, "Baseline debug", baseline=True)
+            baseline_line = baseline[:baseline.index(OLD)].count("\n") + 1
+            run_exact(target, "Baseline debug", baseline_line=baseline_line)
             fixed = fixture_source(source, True)
             write_source(path, fixed, original)
             print(f"corrected_shadow_blob_lf={blob(fixed.encode())}", flush=True)
