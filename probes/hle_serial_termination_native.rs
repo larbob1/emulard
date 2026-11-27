@@ -138,6 +138,6 @@ mod hle_serial_termination_native_review {
         }
         assert!(rx.try_recv().is_err(), "unexpected duplicate/rejected callback");
         // This observes Arc ownership release, not OS thread termination.
-        eprintln!("AI6 serial_termination baseline callbacks=7 canceled=2 rejected=1 port_released=1");
+        eprintln!("AI6 serial_termination baseline events=7 task_callbacks=5 termination_callbacks=1 canceled=2 rejected=1 port_released=1");
     }
 }
