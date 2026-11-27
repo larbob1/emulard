@@ -28,7 +28,7 @@ Phase 6; do not erase unresolved items or equate implementation with FPS.
 | P18 | 6 | Candidate | Opt-in paired-wave DirectStorage worker cap implemented. Descriptor/command list caching, release/PGO evaluation, native Linux backend feasibility and measured worker tuning remain open. |
 | P19 | 6 | Candidate | Stacked paired-wave integration and Windows compile workflow added; builder patch overlap corrected. Actual compile and end-to-end results, and other runtime variant ports remain open. |
 | P20 | 6 | Open | Verify sustained visible gameplay at target milestones (5, 10, 20, 30 FPS); do not count black frames or dropped draws as playable. |
-| P21 | 4 | Candidate | Added independent Linux compile/test job extracting the actual prepared scalar/AVX2, sparse merge and idle budget helpers, with both switch modes. Runtime mask paths, GPU integration, CPU/RAM/transfer telemetry and real benchmarks remain open. |
+| P21 | 4 | Candidate | Independent Linux CI compiled the actual prepared scalar/AVX2, sparse merge and idle budget helpers; five tests passed in each of two switch modes. Runtime mask paths, GPU integration, CPU/RAM/transfer telemetry and real benchmarks remain open. |
 | P22 | 5 | Open | Validate cache publication under concurrent periodic/forced saves and injected serialization/rename failures, restart and driver rejection; test scheduling fairness, compiler contention, cold/warm cache frame times and dropped draws. |
 | P23 | 6 | Open | Validate the storage worker cap against default and multiple caps; confirm throughput, queue starvation, frame times and safe completion under Windows/Proton. |
 | P24 | 6 | Open | Repair any remaining compile/CI failures; verify the builder anchor fix and all cumulative source patches on pinned checkouts. |
@@ -84,7 +84,9 @@ P03: detailed present-to-present frame batches now produce independent p50/p90/p
 
 P06: preflight failures now leave existing aligned diff mappings intact, and range overflow is rejected before mutation. This is not transactional host failure recovery. Existing native map/unmap error paths still require a separate audit and fault injection; no closure claimed.
 
-P21: a separate portable-copy CI job prepares the pinned patched renderer and compiles the exact portable helper functions with rustc on Linux. This can verify pure CPU equivalence and idle-budget tests without compiling D3D12 or claiming gameplay correctness. Results pending.
+P21: a separate portable-copy CI job prepares the pinned patched renderer and compiles the exact portable helper functions with rustc on Linux. This can verify pure CPU equivalence and idle-budget tests without compiling D3D12 or claiming gameplay correctness. Results recorded below.
 
 - [Windows CI 45936505077](https://github.com/larbob1/emulard/actions/runs/45936505077) compiled and ran the first selected HLE test, then failed with a runtime assertion panic in `physical_pages_map_alias_and_unmap`. This is not a release-build success. The assertion location was not included by the earlier sanitized filter; the revised filter records source-relative panic locations, failed test names and the current experiment switches. P01/P24 stay open.
 - [Synthetic CI 45936759570](https://github.com/larbob1/emulard/actions/runs/45936759570) at `4ea21899f6ef644ea1401adcc340bfd8e561b7f3` passed 102 Python and four standalone Rust tests. Runtime mapping tests remain unverified.
+
+- [Linux portable-copy CI 45936840744](https://github.com/larbob1/emulard/actions/runs/45936840744), commit `497c612685113154b7e24cdb8b56206c8f4af9e7`: pinned cumulative source preparation passed, and the extracted actual Rust helpers compiled and passed five tests each with AVX2/sparse disabled and enabled (10 test executions). Hardware-specific AVX2 checks use runtime feature detection. P21 remains a candidate because GPU integration and real performance measurements are absent.
