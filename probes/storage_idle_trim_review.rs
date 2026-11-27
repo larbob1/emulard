@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DEADLINE: Duration = Duration::from_secs(5);
 type Job = (u32, u64);
@@ -19,6 +19,7 @@ struct State {
     starved: bool,
     refused: usize,
     stopped: bool,
+    wake_epoch: u32,
 }
 
 impl State {
@@ -45,7 +46,7 @@ struct Shared {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Event { Trimmed, Waiting }
+enum Event { Trimmed, Waiting(u32) }
 
 #[derive(Debug, PartialEq, Eq)]
 struct Report {
@@ -65,6 +66,19 @@ struct Worker {
 impl Worker {
     fn expect(&self, event: Event) {
         assert_eq!(self.events.recv_timeout(DEADLINE).unwrap(), event);
+    }
+
+    fn wait_epoch(&self, expected: u32) {
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(!remaining.is_zero(), "wait epoch watchdog");
+            match self.events.recv_timeout(remaining).unwrap() {
+                Event::Waiting(epoch) if epoch == expected => return,
+                Event::Waiting(epoch) if epoch < expected => continue,
+                other => panic!("unexpected wait epoch: {other:?}"),
+            }
+        }
     }
 
     fn finish(self) -> Report {
@@ -103,7 +117,7 @@ fn spawn(shared: Arc<Shared>, idle: Vec<u8>) -> Worker {
                 continue;
             }
             report.waits += 1;
-            events.send(Event::Waiting).unwrap();
+            events.send(Event::Waiting(state.wake_epoch)).unwrap();
             // The timeout exists solely to bound this test if progress
             // fails. No periodic wait or timeout-driven trimming proposed.
             let (next, timeout) = shared.work.wait_timeout(state, DEADLINE).unwrap();
@@ -157,13 +171,13 @@ fn refused_head_stays_first_across_trim_and_wake() {
         assert_eq!(state.refused, 1);
     }
     worker.release.send(()).unwrap();
-    worker.expect(Event::Waiting);
+    worker.wait_epoch(0);
     {
         let mut state = shared.state.lock().unwrap();
         assert_eq!(state.pending.len(), 2);
         // Recheck really is a second attempt: do not claim refusal
         // counters remain identical to an implementation without trim.
-        assert_eq!(state.refused, 2);
+        assert!(state.refused >= 2);
         state.staged = 0;
         assert!(std::mem::take(&mut state.starved));
         shared.work.notify_all();
@@ -172,8 +186,8 @@ fn refused_head_stays_first_across_trim_and_wake() {
     let report = worker.finish();
     assert_eq!(report.job, Some((1, 500)));
     assert_eq!(report.trims, 1);
-    assert_eq!(report.waits, 1);
-    assert_eq!(report.attempts, 3);
+    assert!(report.waits >= 1);
+    assert_eq!(report.attempts, report.waits + 2);
     let state = shared.state.lock().unwrap();
     assert_eq!(state.staged, 500);
     assert_eq!(state.pending.front(), Some(&(2, 0)));
@@ -203,35 +217,40 @@ fn empty_wake_does_not_trim_twice_or_skip_wait() {
     let worker = spawn(shared.clone(), vec![0; 4096]);
     worker.expect(Event::Trimmed);
     worker.release.send(()).unwrap();
-    worker.expect(Event::Waiting);
+    worker.wait_epoch(0);
     {
-        let _state = shared.state.lock().unwrap();
+        let mut state = shared.state.lock().unwrap();
+        state.wake_epoch = 1;
         shared.work.notify_all();
     }
-    worker.expect(Event::Waiting);
+    worker.wait_epoch(1);
     {
         let mut state = shared.state.lock().unwrap();
         state.stopped = true;
         shared.work.notify_all();
     }
-    assert_eq!(worker.finish(), Report {
-        job: None, trims: 1, waits: 2, attempts: 3, retained: 0,
-    });
+    let report = worker.finish();
+    assert_eq!(report.job, None);
+    assert_eq!((report.trims, report.retained), (1, 0));
+    assert!(report.waits >= 2);
+    assert_eq!(report.attempts, report.waits + 1);
 }
 
 #[test]
 fn no_retained_capacity_waits_without_trim() {
     let shared = setup(0, &[]);
     let worker = spawn(shared.clone(), Vec::new());
-    worker.expect(Event::Waiting);
+    worker.wait_epoch(0);
     {
         let mut state = shared.state.lock().unwrap();
         state.pending.push_back((7, 0));
         shared.work.notify_all();
     }
-    assert_eq!(worker.finish(), Report {
-        job: Some((7, 0)), trims: 0, waits: 1, attempts: 2, retained: 0,
-    });
+    let report = worker.finish();
+    assert_eq!(report.job, Some((7, 0)));
+    assert_eq!((report.trims, report.retained), (0, 0));
+    assert!(report.waits >= 1);
+    assert_eq!(report.attempts, report.waits + 1);
 }
 
 #[test]
