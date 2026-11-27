@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Regression tests for frozen metadata matching, not external verification."""
 import copy
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 import unittest
 
 from ai0_review_queue import EXPECTED, verify
@@ -58,6 +63,42 @@ class ReviewQueueTests(unittest.TestCase):
             rows[0]["files"] = files
             with self.subTest(files=files), self.assertRaises(ValueError):
                 verify(rows)
+
+
+class StrictCliTests(unittest.TestCase):
+    def run_snapshot(self, raw):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.json"
+            path.write_text(raw, encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("ai0_review_queue.py")),
+                 str(path)], capture_output=True, text=True, timeout=10)
+
+    def test_valid_historical_scope(self):
+        result = self.run_snapshot(json.dumps(EXPECTED))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("HISTORICAL_PR_62_TO_72_ONLY", result.stdout)
+        self.assertIn("not current inventory", result.stdout)
+
+    def test_duplicate_keys_rejected(self):
+        raw = json.dumps(EXPECTED)
+        for prefix in ('"pr": 62, ', '"pr": 999, ',
+                       r'"\u0070r": 62, '):
+            with self.subTest(prefix=prefix):
+                result = self.run_snapshot(raw.replace('{"pr": 62,',
+                    '{' + prefix + '"pr": 62,', 1))
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("INVALID", result.stdout)
+
+    def test_nested_duplicate_keys_rejected(self):
+        from ai0_review_queue import reject_duplicate_keys
+        for raw in ('{"nested":{"x":1,"x":1}}',
+                    '{"nested":{"x":1,"x":2}}'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    json.loads(raw, object_pairs_hook=reject_duplicate_keys)
+                result = self.run_snapshot(raw)
+                self.assertEqual(result.returncode, 1)
 
 
 if __name__ == "__main__":
