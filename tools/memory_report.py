@@ -42,11 +42,40 @@ SCHEMAS = {
         "shader_containers shader_container_mib translations translation_mib pipeline_file_mib last_save_mib"),
 }
 MAX_U64 = 2**64 - 1
+RECENT_LIMIT = 5
+
+
+def remember(group, ordinal, values=None, cumulative=()):
+    """Retain only recent recognized observations, including invalid gaps."""
+    recent = group["recent_observations"]
+    delta = None
+    reason = "invalid_record" if values is None else "no_prior_observation"
+    if values is not None and recent:
+        prior = recent[-1]["values"]
+        if prior is None:
+            reason = "prior_record_invalid"
+        elif any(values[key] < prior[key] for key in cumulative):
+            reason = "descending_cumulative"
+        elif ("window_grid_kib" in values and
+              values["window_grid_kib"] != prior["window_grid_kib"]):
+            reason = "grid_changed"
+        else:
+            delta = {key: value - prior[key] for key, value in values.items()}
+            reason = "adjacent_observed_records"
+    recent.append({"line": ordinal, "values": values,
+                   "adjacent_change": delta, "change_status": reason})
+    if len(recent) > RECENT_LIMIT:
+        del recent[0]
+        # Do not retain a delta whose earlier operand is outside the tail.
+        recent[0]["adjacent_change"] = None
+        if recent[0]["values"] is not None:
+            recent[0]["change_status"] = "prior_outside_tail"
 
 
 def summarize(lines):
     groups = {name: {"valid_records": 0, "invalid_records": 0,
-                     "descending_cumulative_records": 0, "metrics": {}}
+                     "descending_cumulative_records": 0, "metrics": {},
+                     "recent_observations": []}
               for name in SCHEMAS}
     observed_grids = set()
     for ordinal, line in enumerate(lines, 1):
@@ -66,18 +95,22 @@ def summarize(lines):
             match = pattern.fullmatch(line[starts[0].start():]) if len(starts) == 1 else None
             if match is None:
                 row["invalid_records"] += 1
+                remember(row, ordinal)
                 continue
             values = dict(zip(fields, map(int, match.groups())))
             if len(values) != len(fields) or any(v > MAX_U64 for v in values.values()):
                 row["invalid_records"] += 1
+                remember(row, ordinal)
                 continue
             if name == "holders":
                 grid = values["window_grid_kib"]
                 if grid not in (64, 128, 256, 512, 1024, 2048, 4096):
                     row["invalid_records"] += 1
+                    remember(row, ordinal)
                     continue
                 observed_grids.add(grid)
             row["valid_records"] += 1
+            remember(row, ordinal, values, cumulative)
             metrics = row["metrics"]
             if any(k in metrics and values[k] < metrics[k]["last"] for k in cumulative):
                 row["descending_cumulative_records"] += 1
@@ -91,7 +124,7 @@ def summarize(lines):
     return {
         "groups": groups,
         "observed_window_grids_kib": sorted(observed_grids),
-        "note": "Single operator-selected phase, line ordinals relative to supplied input, not clock times. Groups sampled separately; rounded MiB counters may overlap. Made counters are cumulative creation, not live or resident memory. Holder categories are Arc/COM reference proxies, not exclusive owners or unique object counts; window-use and asked-span lines iterate map entries, while the main window census deduplicates objects. Coverage is title address coverage not physical residency; sweep totals are cumulative release accounting, not immediate physical RAM returned; no sums, ownership attribution, leak diagnosis, or causal timing inference. Missing group or invalid record is not zero. Endpoint change is not allocation/release throughput. Descending cumulative values may indicate reset or log ordering. No raw log text, paths, addresses or identifiers.",
+        "note": "Single operator-selected phase, line ordinals relative to supplied input, not clock times. Groups sampled separately; rounded MiB counters may overlap. Made counters are cumulative creation, not live or resident memory. Holder categories are Arc/COM reference proxies, not exclusive owners or unique object counts; window-use and asked-span lines iterate map entries, while the main window census deduplicates objects. Coverage is title address coverage not physical residency; sweep totals are cumulative release accounting, not immediate physical RAM returned; no sums, ownership attribution, leak diagnosis, or causal timing inference. Missing group or invalid record is not zero. Endpoint change is not allocation/release throughput. Recent observations retain up to five recognized records per group; invalid gaps, descending cumulative values or changed grid suppress adjacent differences. Consecutive observed records do not prove uninterrupted sampling or equal time intervals. Descending cumulative values may indicate reset or log ordering. No raw log text, paths, addresses or identifiers.",
     }
 
 

@@ -70,6 +70,38 @@ class MemoryReportTests(unittest.TestCase):
         self.assertNotIn("private-malformed", json.dumps(result))
         self.assertEqual(summarize([memory()])["groups"]["sweep"]["metrics"], {})
 
+    def test_recent_observations_preserve_invalid_gap(self):
+        result = summarize([memory(), HOLDERS, memory().replace("3637", "-1"),
+                            memory(3191, 12430, 4120, 3703, 20),
+                            memory(3200, 12431, 4121, 3704, 21)])
+        rows = result["groups"]["memory"]["recent_observations"]
+        self.assertEqual([r["line"] for r in rows], [1, 3, 4, 5])
+        self.assertIsNone(rows[1]["values"])
+        self.assertIsNone(rows[2]["adjacent_change"])
+        self.assertEqual(rows[2]["change_status"], "prior_record_invalid")
+        self.assertEqual(rows[3]["adjacent_change"]["working_set_mib"], 1)
+        self.assertNotIn("private-prefix", json.dumps(result))
+
+    def test_recent_tail_is_bounded_and_never_references_evicted_row(self):
+        group = summarize(memory(made=n) for n in range(10))["groups"]["memory"]
+        rows = group["recent_observations"]
+        self.assertEqual([r["line"] for r in rows], [6, 7, 8, 9, 10])
+        self.assertIsNone(rows[0]["adjacent_change"])
+        self.assertEqual(rows[0]["change_status"], "prior_outside_tail")
+        self.assertEqual(rows[-1]["adjacent_change"]["upload_made"], 1)
+        self.assertEqual(group["valid_records"], 10)
+
+    def test_recent_counter_reset_and_grid_change_suppress_delta(self):
+        rows = summarize([memory(made=10), memory(made=9), memory(made=11)]
+                         )["groups"]["memory"]["recent_observations"]
+        self.assertEqual(rows[1]["change_status"], "descending_cumulative")
+        self.assertIsNone(rows[1]["adjacent_change"])
+        self.assertEqual(rows[2]["adjacent_change"]["upload_made"], 2)
+        rows = summarize([HOLDERS, HOLDERS.replace("4096 KiB", "2048 KiB")]
+                         )["groups"]["holders"]["recent_observations"]
+        self.assertEqual(rows[-1]["change_status"], "grid_changed")
+        self.assertIsNone(rows[-1]["adjacent_change"])
+
     def test_cumulative_decrease_does_not_hide_latest(self):
         group = summarize([memory(made=10), memory(made=9)])["groups"]["memory"]
         self.assertEqual(group["descending_cumulative_records"], 1)
