@@ -56,15 +56,23 @@ fn storage_scratch_native_file_parity() {
                 (0usize, 4096usize, 4104usize, Ok(())),
                 (19, 4096, 4104, Ok(())),
                 (123, 32, 40, Ok(())),
+                // Reject before bounce while a bounded slot is populated.
+                (0, 16, 8, Err(E_INVALIDARG)),
                 (end - 65536, 65536, 65544, Ok(())),
                 (end - 3, 16, 24, Err(END_OF_FILE)),
                 (end, 16, 24, Err(END_OF_FILE)),
                 (end, 0, 8, Ok(())),
                 (0, 131072, 131080, Ok(())),
-                (0, 16, 8, Err(E_INVALIDARG)),
                 (57, 4096, 4104, Ok(())),
                 (99, 4096, 4104, Ok(())),
             ] {
+                let previous_calls = scratch.calls;
+                let previous_hits = scratch.hits;
+                let previous_capacity = scratch.idle.capacity();
+                let previous_ptr = scratch.idle.as_ptr();
+                let preflight_rejected = size > dest_size;
+                let expected_hit = !preflight_rejected && size != 0
+                    && cap != 0 && size <= cap && previous_capacity >= size;
                 let mut baseline = vec![0xA5; dest_size + 16];
                 let mut candidate = baseline.clone();
                 let mut req = request(0, baseline[8..8+dest_size].as_mut_ptr().cast(),
@@ -83,7 +91,19 @@ fn storage_scratch_native_file_parity() {
                 } else {
                     assert!(candidate.iter().all(|&x| x == 0xA5));
                 }
+                assert_eq!(scratch.calls - previous_calls, usize::from(!preflight_rejected));
+                assert_eq!(scratch.hits - previous_hits, usize::from(expected_hit));
+                assert!(scratch.idle.is_empty());
                 assert!(scratch.idle.capacity() <= cap);
+                if preflight_rejected {
+                    if cap != 0 { assert!(previous_capacity >= 4096); }
+                    assert_eq!(scratch.idle.capacity(), previous_capacity);
+                    assert_eq!(scratch.idle.as_ptr(), previous_ptr);
+                }
+                if expected_hit && expected.is_ok() {
+                    assert_eq!(scratch.idle.capacity(), previous_capacity);
+                    assert_eq!(scratch.idle.as_ptr(), previous_ptr);
+                }
                 if expected == Err(END_OF_FILE) || (expected.is_ok() && size > cap) {
                     assert_eq!(scratch.idle.capacity(), 0);
                 }
@@ -195,6 +215,9 @@ fn storage_scratch_native_nonbounce() {
     r.destination = candidate[8..40].as_mut_ptr().cast();
     assert_eq!(execute_scratch_review(&r, &mut scratch), Ok(()));
     assert_eq!(candidate, baseline);
+    assert_eq!(&candidate[8..24], &bytes[..16]);
+    assert!(candidate[..8].iter().all(|&v| v == 0xA5));
+    assert!(candidate[24..].iter().all(|&v| v == 0xA5));
     assert_eq!(scratch.calls, 1);
     assert_eq!(scratch.idle.capacity(), retained);
 
