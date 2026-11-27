@@ -84,6 +84,9 @@ def validate_paired(target, *, keep_going=False):
         suite("victory-hle", "tile_replay_checks", env=env)
     suite("victory-hle", "perf6_worker_tests")
     suite("victory-hle", "placeholder_hint_tests")
+    for mode in ("0", "1"):
+        env = dict(os.environ, VICTORY_STORAGE_PAGE_LOOKUP=mode)
+        suite("victory-hle", "storage_page_lookup_matches_run_planner", env=env)
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="0", VICTORY_MAP_RUNS="0", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
     suite("victory-hle", "physical_pages_map_alias_and_unmap", env=env)
     env = dict(os.environ, VICTORY_MAP_SKIP_SAME="0", VICTORY_MAP_DIFF="1", VICTORY_MAP_RUNS="1", VICTORY_MAP_DIFF_RUNS="1", VICTORY_MAP_EXACT_PLACEHOLDERS="1")
@@ -165,6 +168,7 @@ def main():
             run([sys.executable, str(PATCHER.with_name("apply_mapping_hotpath.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_alias_direct_run.py")), str(target)])
             run([sys.executable, str(PATCHER.with_name("apply_exact_placeholders.py")), str(target)])
+            run([sys.executable, str(PATCHER.with_name("apply_storage_page_lookup.py")), str(target)])
             run(["git", "diff", "--check"], target)
             if ns.build:
                 validate_paired(target)
