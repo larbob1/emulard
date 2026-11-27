@@ -54,6 +54,7 @@ def main():
                 "paired-wave-dropped-scene-draws.patch",
                 "paired-wave-native-upscaler.patch",
                 "paired-wave-remap-timing.patch",
+                "paired-wave-wine-placeholder-reuse.patch",
             ):
                 run(["git", "apply", str(own / "patches" / patch)], target)
             run([sys.executable, str(PATCHER.with_name("apply_pipeline_stack_patch.py")), str(target), "--apply"])

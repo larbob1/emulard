@@ -212,6 +212,38 @@ took 18.3 seconds, including 6.8 seconds of system mapping and 3.7 seconds
 of system unmapping across threads. The next two captured frames took
 4.9 and 2.8 seconds, including 450 and 296 milliseconds of copy-back.
 
+### Buffer-copy performance under Proton
+
+In a Series S Story Mode run on the RTX 5060 Ti, `VICTORY_COPY_CHANGED=alt`
+alternated between uploading changed 256-byte chunks and the default at
+20-second intervals. After pipeline compilation settled, GPU upload volume
+was about 9 MB per frame with comparison enabled and 44 MB with it
+disabled. Median reported frame times were about 2.4 and 1.9 seconds
+respectively, from four enabled and six disabled reporting windows after
+excluding the first six seconds after each toggle. The title progressed
+through the scene during the run, so the windows contain different frames.
+Keep the changed-byte mode off by default.
+
+The separate `VICTORY_COPY_PLAIN=1` trial stayed below 1 FPS during the
+sampled world transition while pipelines were compiling. Neither trial
+established an FPS gain. In one 4.7-second frame from the alternating run,
+system map and unmap calls alone totaled 4.3 seconds across threads.
+That points to the host memory mapping path as the next place to measure
+and reduce work.
+
+In the paired-wave build, set `VICTORY_CACHE_PAGE_PLACEHOLDERS=1` on
+Proton to reuse exact single-page placeholders after successful unmaps.
+This carries over the baseline's Wine-specific fast path. If Wine
+rejects a cached address, the mapper splits the placeholder and retries.
+The option is off by default. Use `VICTORY_CACHE_PAGE_PLACEHOLDERS=alt`
+to alternate every 30 seconds. With `VICTORY_FRAME_LOG=1`, long frames
+report successful reuses and fallbacks.
+
+In the Proton trial, one 7.9-second world frame reused 1,048 placeholders
+with zero reuse fallbacks. The mapper still spent seconds in system calls,
+and the trial did not establish a sustained FPS gain. All 12 xmem tests
+passed under Proton with reuse enabled and with it disabled.
+
 ### Replay tile mappings
 
 In a diagnostic refresh build, set `VICTORY_PAGE_TRACE` to a new writable

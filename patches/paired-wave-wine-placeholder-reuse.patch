@@ -1,0 +1,132 @@
+--- a/crates/victory-hle/src/modules/xmem.rs
++++ b/crates/victory-hle/src/modules/xmem.rs
+@@ -377,6 +377,8 @@
+     pages: HashMap<usize, Slice>,
+     /// Mapped views by address: their length and what they show.
+     views: BTreeMap<usize, (usize, Slice)>,
++    /// Exact single-page placeholders preserved by successful unmaps.
++    vacant_pages: std::collections::BTreeSet<usize>,
+     /// Where each page shows: by its section and its index there, the
+     /// address of that page in every view that shows it now ([`shown_at`];
+     /// as upstream's c75fdba keeps it). The title maps pages where the
+@@ -395,6 +397,27 @@
+ 
+ fn physical() -> MutexGuard<'static, Physical> {
+     PHYSICAL.lock().unwrap_or_else(|e| e.into_inner())
++}
++
++fn reuse_placeholders() -> bool {
++    static MODE: LazyLock<Option<std::ffi::OsString>> =
++        LazyLock::new(|| std::env::var_os("VICTORY_CACHE_PAGE_PLACEHOLDERS"));
++    if !on_wine() {
++        return false;
++    }
++    match MODE.as_deref().and_then(std::ffi::OsStr::to_str) {
++        Some("1") => true,
++        Some("alt") => {
++            static START: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
++            static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
++            let on = START.elapsed().as_secs() / 30 % 2 == 1;
++            if LAST.swap(u8::from(on), std::sync::atomic::Ordering::Relaxed) != u8::from(on) {
++                tracing::info!(on, "Wine placeholder reuse comparison");
++            }
++            on
++        }
++        _ => false,
++    }
+ }
+ 
+ /// Back this section with a sparse file so the host can reclaim its pages
+@@ -959,15 +982,9 @@
+ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
+     use victory_gpu::framelog::{T, add};
+     let started = std::time::Instant::now();
+-    // SAFETY: splits the placeholder around the range (failing harmlessly
+-    // when the range is the whole placeholder), then maps the section
+-    // there; both act only on placeholders.
+-    let view = unsafe {
+-        VirtualFree(
+-            base as *mut c_void,
+-            len,
+-            MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER,
+-        );
++    let reuse = len == PAGE && physical.vacant_pages.remove(&base) && reuse_placeholders();
++    // SAFETY: replaces only an exact placeholder.
++    let replace = || unsafe {
+         MapViewOfFile3(
+             slice.section.0,
+             GetCurrentProcess(),
+@@ -980,6 +997,21 @@
+             0,
+         )
+     };
++    let mut view = MEMORY_MAPPED_VIEW_ADDRESS { Value: std::ptr::null_mut() };
++    if reuse {
++        view = replace();
++        if view.Value as usize == base {
++            add(T::RemapReused, 1);
++        } else {
++            add(T::RemapReuseFallback, 1);
++        }
++    }
++    if view.Value as usize != base {
++        // A cached placeholder may have been released or coalesced.
++        // SAFETY: splits only a placeholder.
++        unsafe { VirtualFree(base as *mut c_void, len, MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER) };
++        view = replace();
++    }
+     if view.Value as usize != base {
+         tracing::warn!(
+             address = format_args!("{base:#x}"),
+@@ -1099,7 +1131,7 @@
+         let noted = std::time::Instant::now();
+         add(T::RemapNotesUs, (noted - started).as_micros() as u64);
+         // SAFETY: a view we mapped; it becomes a placeholder again.
+-        unsafe {
++        let unmapped = unsafe {
+             UnmapViewOfFile2(
+                 GetCurrentProcess(),
+                 MEMORY_MAPPED_VIEW_ADDRESS {
+@@ -1107,7 +1139,12 @@
+                 },
+                 MEM_PRESERVE_PLACEHOLDER,
+             )
+-        };
++        } != 0;
++        if unmapped && size == PAGE && at >= base && at + size <= end
++            && physical.vacant_pages.len() < 65_536 && reuse_placeholders()
++        {
++            physical.vacant_pages.insert(at);
++        }
+         add(T::RemapUnmapUs, noted.elapsed().as_micros() as u64);
+         // What of the view lies outside the range asked for is mapped
+         // again below: the whole view went for it.
+--- a/crates/victory-gpu/src/framelog.rs
++++ b/crates/victory-gpu/src/framelog.rs
+@@ -113,6 +113,8 @@
+     RemapNotesUs,
+     RemapCuts,
+     RemapCutBytes,
++    RemapReused,
++    RemapReuseFallback,
+     Count,
+ }
+ 
+@@ -426,7 +428,7 @@
+          recording, all threads: {:.1} ms in {:.0} calls; all submit calls {:.1} ms | textures: refresh {:.1} ms ({:.1} waiting for memory to hold \
+          still), {:.0} uploads, staging {:.0} made {:.0} reused | remapping: {:.0} calls {:.1} ms ({:.1} waiting for \
+          readers; of it the system's unmapping {:.1}, its mapping {:.1}, committing {:.1}, our own notes of the change \
+-         {:.1}; {:.0} views cut, {:.1} MB of them mapped again) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
++         {:.1}; {:.0} views cut, {:.1} MB of them mapped again; {} placeholders reused, {} reuse fallbacks) | pipelines: {:.0} made, {:.0} loaded, {:.1} ms waited | disk: {:.0} reads {:.1} MB {:.1} worker ms | \
+          faults: {:.0} page, {:.0} guard | process: {:.0} user {:.0} kernel ms | pacing, all threads {:.1} ms | {:.0} \
+          draws | {:.0} MB free | found on a slow core: the render thread {:.0} of {:.0} looks, the submit thread {:.0} of {:.0}, recording threads {:.0} of {:.0}",
+         f.us / 1e3,
+@@ -474,6 +476,8 @@
+         ms(T::RemapNotesUs),
+         t(T::RemapCuts),
+         t(T::RemapCutBytes) / (1 << 20) as f64,
++        t(T::RemapReused),
++        t(T::RemapReuseFallback),
+         s(S_PIPELINES_MADE),
+         s(S_PIPELINES_LOADED),
+         ms(T::PipelineWaitUs),
