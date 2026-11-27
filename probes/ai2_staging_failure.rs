@@ -48,7 +48,7 @@ mod ai2_staging_failure_review {
     // For this specific linear 4x2x3 descriptor, each slice has two
     // 256-byte rows. Construct bytes independently of Layout::offset.
     fn source(value: u8) -> Vec<u8> {
-        let mut data = vec![0x7d; BYTES];
+        let mut data = vec![if value == 0 { 0 } else { 0x7d }; BYTES];
         for slice in 0..SLICES {
             for row in 0..ROWS {
                 for col in 0..ACTIVE {
@@ -149,7 +149,7 @@ mod ai2_staging_failure_review {
     }
 
     #[test]
-    fn actual_complete_detile_including_mapped_zero() {
+    fn actual_complete_detile_including_zero_source() {
         check(None, false);
         check(None, true);
     }
