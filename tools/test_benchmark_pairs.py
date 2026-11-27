@@ -66,6 +66,15 @@ class BenchmarkPairsTests(unittest.TestCase):
         self.assertEqual(row["candidate_latest_cumulative_counters"][label]["pages"], 70)
         self.assertEqual(row["candidate_cumulative_counter_observations"][label]["valid_records"], 1)
 
+    def test_pairs_preserve_exact_placeholder_counter(self):
+        label = "exact placeholder totals"
+        a = summarize([sample()])
+        b = summarize([sample(), label + " attempts=8 hits=7"])
+        row = aggregate([(a, b)])["runs"][0]
+        self.assertNotIn(label, row["baseline_latest_cumulative_counters"])
+        self.assertEqual(row["candidate_latest_cumulative_counters"][label],
+                         {"attempts": 8, "hits": 7})
+
     def test_empty_input(self):
         with self.assertRaises(ValueError):
             aggregate([])

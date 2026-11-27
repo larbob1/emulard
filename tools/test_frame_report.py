@@ -205,6 +205,19 @@ class FrameReportTests(unittest.TestCase):
         self.assertNotIn("private", str(result))
         self.assertIn("not host syscalls", result["cumulative_counter_note"])
 
+    def test_exact_placeholder_counter_quality(self):
+        label = "exact placeholder totals"
+        lines = ["private " + label + " attempts=4 hits=3",
+                 label + " attempts=8 hits=7",
+                 label + " attempts=16",
+                 label + " attempts=16 hits=7.5"]
+        report = summarize(lines)
+        self.assertEqual(report["latest_cumulative_counters"][label],
+                         {"attempts": 8, "hits": 7})
+        self.assertEqual(report["cumulative_counter_observations"][label],
+                         {"valid_records": 2, "invalid_records": 2, "nonmonotonic_records": 0})
+        self.assertNotIn("private", str(report))
+
     def test_prefix_not_exported(self):
         self.assertNotIn("synthetic-prefix", str(summarize([sample()])))
 

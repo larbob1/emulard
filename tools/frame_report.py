@@ -151,6 +151,7 @@ COUNTERS = {
     "texture view estimate hits": ("hits",),
     "alias direct run totals": ("attempts", "hits"),
     "scatter lock batch totals": ("batches", "pages", "failures"),
+    "exact placeholder totals": ("attempts", "hits"),
 }
 def update_counters(latest, line, quality=None):
     for message, fields in COUNTERS.items():
