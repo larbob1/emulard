@@ -57,3 +57,17 @@ class HeapRecordingObservationTests(unittest.TestCase):
         self.assertIn("deferred.kept.iter()",part)
         self.assertNotIn(".clone()",part)
         self.assertNotIn(".cast",part)
+
+    def test_detached_fixture_uses_actual_title_list_lifecycle(self):
+        src = "\n".join(new for _, new in PATCHES["crates/victory-gpu/src/list.rs"])
+        self.assertIn("fn detached_list_keeps_recording_after_title_reset()", src)
+        self.assertIn("old.keep(&fence)", src)
+        self.assertIn("drop(fence)", src)
+        self.assertIn("detach(&[title, title])", src)
+        self.assertIn("assert_eq!(order, [0, 0])", src)
+        self.assertIn("saved._uploads.iter()", src)
+        self.assertLess(src.index("saved._uploads.iter()"), src.index("from_raw_parts(p, 40)"))
+        self.assertLess(src.index("release(title)"), src.index("from_raw_parts(p, 40)"))
+        self.assertIn("drop(detached)", src)
+        self.assertNotIn("gpu.execute(", src)
+        self.assertNotIn(".Signal(", src)
