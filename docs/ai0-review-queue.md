@@ -44,6 +44,8 @@ Repeated baseline tests are not independent new tests. The embedded extracted Ru
 
 ## Offline checker
 
+Historical scope: PRs #62–#72 only, not the current AI0 proposal inventory. Duplicate JSON object keys are rejected at every nesting level, even when values agree.
+
 `python tools/ai0_review_queue.py --print-reference` prints the frozen reference shape. Collect current PR/diff/job metadata independently (including actual checkout and test counts from logs), normalize to that shape, then run `python tools/ai0_review_queue.py snapshot.json`. The checker performs exact frozen matching, rejects drift, and reports shared upstream groups. It does not authenticate a supplied file or fetch current state. Printing the reference and feeding it back is a smoke test only; it is not independent evidence. Run regression tests with `python -m unittest discover -s tools -p test_ai0_review_queue.py`.
 
 If any exact head, base, path, status or receipt changes, stop and obtain fresh review and applicable validation. Do not rewrite this snapshot to manufacture a pass. AI1/owner retain all review and integration authority.
