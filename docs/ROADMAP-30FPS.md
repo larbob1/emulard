@@ -90,6 +90,6 @@ A possible starting budget for **non-overlapping critical-path** work is 8 ms CP
 
 ## Status snapshot
 
-At the time of writing, all 24 deferred IDs remain unresolved. Phase 6 synthetic CI passed 107 Python tests, 4 range-gate tests and 10 portable copy-helper executions at `8956a8e`. Native runtime and gameplay acceptance remain unverified. The authoritative [register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md) and [Actions](https://github.com/larbob1/emulard/actions) should be used for live evidence.
+At the time of writing, all 24 deferred IDs remain unresolved. Phase 6 synthetic CI passed 107 Python tests, 4 range-gate tests and 10 portable copy-helper executions at `8956a8e`. All 21 selected native Windows suite invocations and both runtime build profiles subsequently passed at `8956a8e` ([CI evidence](https://github.com/larbob1/emulard/actions/runs/45937702602)). Newer candidate validation, Proton execution and gameplay acceptance remain unverified. The authoritative [register](https://github.com/larbob1/emulard/blob/dev/performance-phase6/docs/performance-deferred.md) and [Actions](https://github.com/larbob1/emulard/actions) should be used for live evidence.
 
 Every completed task must identify the validating commit, test/benchmark command, outcome and remaining caveats. Keep unfinished tasks listed. If a prototype fails to improve performance or breaks correctness, revert or leave it disabled rather than promoting it.

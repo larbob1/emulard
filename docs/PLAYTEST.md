@@ -1,15 +1,15 @@
 # Short performance test (first comparison)
 
-The purpose of this session is to identify which settings help on real hardware, not to certify 30 FPS. Keep the known-working build and original prefix available. The candidate's Windows runtime validation is still pending; earlier builds compiled but had mapping regression failures. If any smoke check, memory test or launch fails, record it and stop that candidate. Do not disable correctness checks.
+The purpose of this session is to identify which settings help on real hardware, not to certify 30 FPS. Keep the known-working build and original prefix available. The selected candidate passed all 21 selected Windows test invocations and both build profiles in [Windows CI](https://github.com/larbob1/emulard/actions/runs/45937702602). Proton gameplay remains unverified. Newer commits are being checked separately; use the pinned revision below. If any smoke check, memory test or launch fails, record it and stop that candidate. Do not disable correctness checks.
 
 ## 1. Select a build
 
-For a test of the cumulative branch, use a separate integration checkout pinned to commit `027849b6915b3998aed22765040f109c41a23cb7`:
+For a test of the cumulative branch, use a separate integration checkout pinned to commit `8956a8e3a3f847a2e7959ac17623debc11a1da6c`:
 
 ```sh
 git clone --branch dev/performance-phase6 https://github.com/larbob1/emulard.git emulard-playtest
 cd emulard-playtest
-git switch --detach 027849b6915b3998aed22765040f109c41a23cb7
+git switch --detach 8956a8e3a3f847a2e7959ac17623debc11a1da6c
 python3 tools/build_runtime.py ../runtime-playtest --paired-wave-refresh
 python3 tools/cross_build.py ../runtime-playtest --diagnostics --jobs 2
 ```
@@ -36,11 +36,21 @@ Close each run normally. Use fresh log names for additional runs (redirection ov
 
 ## 3. Collect results
 
-From the cumulative development checkout:
+From the pinned development checkout:
 
 ```sh
 python3 tools/frame_report.py candidate.log --baseline baseline.log --skip 5 --skip-frame-batches 1
 ```
+
+The report's `fps_milestones` includes 30 FPS. For the newer explicit 30 FPS report, fetch and switch only the separate integration checkout (the compiled runtime is outside it):
+
+```sh
+git fetch origin
+git switch dev/performance-phase6
+python3 tools/frame_report.py candidate.log --baseline baseline.log --skip 5 --skip-frame-batches 1 --target-fps 30
+```
+
+The newer reporting script does not change the external runtime binary. `approx_present_fps` estimates the presentation rate from rounded frame times, not verified visible gameplay FPS.
 
 If there are not enough intervals, repeat with a smaller, identical warmup exclusion and report it. Review the numeric output before sharing it. Raw logs stay on your computer. Record whether the full world is visible, the game responds to controls, and there are crashes, drops or missing graphics. Note the tested commit and actual driver/Proton versions.
 

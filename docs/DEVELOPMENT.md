@@ -29,7 +29,7 @@ The cumulative performance branch adds candidates for memory mapping, shorter te
 | Synthetic regression suite | [107 Python tests and 4 standalone Rust tests](https://github.com/larbob1/emulard/actions/runs/45937706891) passed at commit `8956a8e` |
 | Portable copy-back helpers | Same CI: 5 Rust tests in each of two modes (10 executions); not full GPU validation |
 | Isolated reverse-alias index | [Synthetic CI passed](https://github.com/larbob1/emulard/actions/runs/45937502413); native verification pending |
-| Windows runtime tests / full build | Earlier HLE executable compiled but a mapping assertion failed; [active validation](https://github.com/larbob1/emulard/actions/runs/45937238198) and [newer validation](https://github.com/larbob1/emulard/actions/runs/45937702602) track corrections |
+| Windows runtime tests / full build | [All 21 selected suite invocations and both build profiles passed](https://github.com/larbob1/emulard/actions/runs/45937702602) at `8956a8e`; newer candidate validation and Proton gameplay remain separate |
 | Correct rendering and sustained FPS | Unverified |
 
 CI status changes over time; follow the linked runs rather than treating this snapshot as a live badge. No FPS improvement or playable release is claimed.
@@ -62,6 +62,8 @@ The main performance concern is host virtual memory mapping/unmapping and synchr
 Use the cumulative Phase 6 branch for the latest experimental code. Earlier branches are intentionally preserved until the pull request chain is validated and integrated. See the [branch policy](BRANCHES.md) before merging or deleting branches.
 
 ## Prepare and build the experimental runtime
+
+For a controlled first comparison, prefer the Windows-validated revision in the [short playtest guide](PLAYTEST.md) rather than automatically building the newest experimental commit.
 
 These are developer instructions, not an installation guide for a finished product. Use Git, Python 3, the upstream pinned Rust toolchain, and a suitable build environment. A Linux cross-build additionally needs cargo-xwin, Clang, LLD and Windows SDK support. Review the upstream dependencies and build scripts before execution; the preparation tool fetches the pinned public upstream source.
 
