@@ -106,6 +106,13 @@ impl CompletionPages {
         assert_eq!(xmem::page_window(&owned.ids, PAGE - 8, 16).is_some(), !separate);
         owned
     }
+    fn free_checked(&mut self) {
+        use crate::modules::xmem;
+        assert!(self.ids.iter().all(|id| *id != 0));
+        assert_eq!(xmem::XMemFreePhysicalPages(self.ids.len(), self.ids.as_ptr()), 1);
+        // Retire only on success; Drop remains fallback on unwind.
+        self.ids = [0; 2];
+    }
     fn seen(&self) -> [u8; 32] {
         use crate::modules::xmem;
         let mut bytes = [0; 32];
@@ -121,7 +128,9 @@ impl Drop for CompletionPages {
     fn drop(&mut self) {
         use crate::modules::xmem;
         // Zero is not an allocated page ID. Allow cleanup on partial setup.
-        let _ = xmem::XMemFreePhysicalPages(self.ids.len(), self.ids.as_ptr());
+        if self.ids.iter().any(|id| *id != 0) {
+            let _ = xmem::XMemFreePhysicalPages(self.ids.len(), self.ids.as_ptr());
+        }
     }
 }
 
@@ -161,6 +170,9 @@ fn storage_completion_native_pages() {
             // loops until EOF, with precisely three source bytes remaining.
             // Disjoint fallback never publishes a failed fill.
             assert_eq!(destinations[i].seen(), completion_expected(&data, i, !separate));
+        }
+        for destination in destinations.iter_mut() {
+            destination.free_checked();
         }
     }
 }
