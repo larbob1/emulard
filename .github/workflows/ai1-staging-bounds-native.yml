@@ -1,0 +1,37 @@
+name: AI1 exact staging bounds allocation gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai2_staging_bounds_allocation.rs'
+      - 'tools/preview_ai2_staging_bounds.py'
+      - 'tools/validate_ai1_staging_bounds_native.py'
+      - '.github/workflows/ai1-staging-bounds-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  staging-bounds-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-staging-bounds-native'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_staging_bounds_native.py
+      - name: Exercise six exact owned staging allocation gates
+        run: python tools/validate_ai1_staging_bounds_native.py
