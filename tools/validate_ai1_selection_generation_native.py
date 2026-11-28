@@ -142,6 +142,50 @@ def parse_receipts(stdout, stderr, case):
     if rows[1] != expected:
         raise ValueError("malformed selection case receipt")
 
+UINT = r'(?:0|[1-9][0-9]*)'
+
+def parse_listing(stdout, stderr, code):
+    if code != 0:
+        raise ValueError('listing exit')
+    rows = [line for line in stdout.splitlines() if line.strip()]
+    if not rows:
+        raise ValueError('missing listing')
+    footer = re.fullmatch(r'(' + UINT + r') tests?, 0 benchmarks?', rows[-1])
+    if not footer:
+        raise ValueError('listing footer')
+    names = []
+    for line in rows[:-1]:
+        entry = re.fullmatch(r'(\S+): test', line)
+        if not entry:
+            raise ValueError('invalid listing row')
+        names.append(entry.group(1))
+    if len(names) != int(footer.group(1)) or len(names) != len(set(names)):
+        raise ValueError('listing cardinality')
+    if any(re.search(r'\b\S+: (?:test|benchmark)\b|\b\d+ tests?, \d+ benchmarks?\b|\bpanicked at\b', line) for line in stderr.splitlines()):
+        raise ValueError('contradictory listing stderr')
+    return set(names)
+
+def verify_discovery(full, ignored):
+    if not set(NAMES) <= ignored or not ignored <= full:
+        raise ValueError('discovery mismatch')
+    return len(full) - 1
+
+def verify_framing(stdout, stderr, code, name, filtered):
+    if code != 0 or filtered < 0:
+        raise ValueError('exit or filtered count')
+    out, err = stdout.splitlines(), stderr.splitlines()
+    if any(re.search(r'\bpanicked at\b|\bthread .* panicked\b', l, re.IGNORECASE) for l in out+err):
+        raise ValueError('unexpected panic')
+    framing = re.compile(r'\btest\s+\S+\s+\.\.\.|\brunning\s+\d+\s+tests?\b|test result:')
+    if any(framing.search(l) for l in err):
+        raise ValueError('contradictory stderr')
+    rows = [l for l in out if framing.search(l)]
+    summary = (r'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; '
+               + str(filtered) + r' filtered out; finished in [0-9]+(?:\.[0-9]+)?s')
+    if len(rows) != 3 or rows[:2] != ['running 1 test', f'test {name} ... ok'] or not re.fullmatch(summary, rows[2]):
+        raise ValueError('exact ordered framing')
+
+
 def run_exact(exe, target, release, case):
     profile = "release" if release else "debug"
     name = NAMES[case]
@@ -150,23 +194,16 @@ def run_exact(exe, target, release, case):
     env.update(flags)
     print(f"profile={profile} case={case} executable_sha256={hashlib.sha256(exe.read_bytes()).hexdigest()}", flush=True)
     print("fixture env=" + json.dumps(flags, sort_keys=True) + " VICTORY_COPY_MODE=absent VICTORY_GPU_TIMING=absent", flush=True)
+    p = direct([str(exe), "--list"], target, env)
+    full = parse_listing(p.stdout, p.stderr, p.returncode)
     p = direct([str(exe), "--list", "--ignored"], target, env)
-    if p.returncode or any(p.stdout.splitlines().count(n + ": test") != 1 for n in NAMES):
-        raise ValueError("exact ignored listing")
+    ignored = parse_listing(p.stdout, p.stderr, p.returncode)
+    filtered = verify_discovery(full, ignored)
+    print(f"discovery full={len(full)} ignored={len(ignored)} filtered={filtered}", flush=True)
     p = direct([str(exe), name, "--exact", "--ignored", "--test-threads=1",
                 "--format", "pretty", "--nocapture"], target, env)
     print(f"child_exit case={case} code={p.returncode}", flush=True)
-    out, err = p.stdout.splitlines(), p.stderr.splitlines()
-    if any(re.search(r"\bpanicked at\b|\bthread .* panicked\b", l, re.IGNORECASE) for l in out + err):
-        raise ValueError("unexpected panic")
-    tests = [l for l in out if re.search(r"\btest\s+\S+\s+\.\.\.", l)]
-    summaries = [l for l in out if "test result:" in l]
-    running = [l for l in out if re.search(r"\brunning\s+\d+\s+tests?\b", l)]
-    summary = r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; (?:0|[1-9][0-9]*) filtered out; finished in [0-9]+(?:\.[0-9]+)?s"
-    if any("test result:" in l or re.search(r"\btest\s+\S+\s+\.\.\.|\brunning\s+\d+\s+tests?\b", l) for l in err):
-        raise ValueError("contradictory stderr test framing")
-    if p.returncode or running != ["running 1 test"] or tests != [f"test {name} ... ok"] or len(summaries) != 1 or not re.fullmatch(summary, summaries[0]):
-        raise ValueError("missing exact native test receipt")
+    verify_framing(p.stdout, p.stderr, p.returncode, name, filtered)
     parse_receipts(p.stdout, p.stderr, case)
     print(f"accepted case={case} observation={'adverse' if case in (3,4,5,6,8,9) else 'control'}", flush=True)
 
