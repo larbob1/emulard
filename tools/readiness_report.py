@@ -24,7 +24,6 @@ REASONS = {
     "relative_register": ("relative VGPR", "relative register", "relative vgpr"),
 }
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-PAGES = re.compile(r"\bpages=(\d+)\b")
 DIRTY = re.compile(r"\bdirty_pages=(\d+)\b")
 
 def number(pattern, line):
@@ -33,7 +32,7 @@ def number(pattern, line):
         return int(match[1])
     return None
 
-def builder_field(line, key):
+def numeric_field(line, key):
     # Count assignments, not only successful numeric matches. One valid
     # assignment plus one malformed assignment is still ambiguous.
     matches = re.findall(rf"(?:^|\s){key}=([^\s]*)", line)
@@ -51,12 +50,12 @@ def builder_event(builder, line, state):
         builder["last_numeric_quality"] = "not_applicable"
         return
     if state == "ready_report":
-        total, quality = builder_field(line, "pipelines")
+        total, quality = numeric_field(line, "pipelines")
         if quality == "valid":
             builder["last_missing"], builder["last_total"] = 0, total
     else:
-        missing, mq = builder_field(line, "missing")
-        total, tq = builder_field(line, "of")
+        missing, mq = numeric_field(line, "missing")
+        total, tq = numeric_field(line, "of")
         quality = ("invalid" if "invalid" in (mq, tq) else
                    "missing" if "missing" in (mq, tq) else "valid")
         if quality == "valid":
@@ -76,7 +75,8 @@ def summarize_readiness(lines, skip=0):
                "latest_observed_state": "unobserved",
                "last_numeric_quality": "unobserved",
                "unusable_numeric_reports": 0}
-    memory = {"fault_reports": 0, "reported_missing_pages": 0,
+    memory = {"fault_reports": 0, "reported_missing_pages": None,
+              "fault_numeric_reports": {"valid": 0, "missing": 0, "invalid": 0},
               "completed_feedback_reports": 0, "reported_dirty_pages": 0,
               "directory_capacity_reports": 0}
     def observed():
@@ -97,7 +97,16 @@ def summarize_readiness(lines, skip=0):
                 builder_event(builder, line, "ready_report")
             if "shaders touched pages that had no copy" in line:
                 memory["fault_reports"] += 1
-                memory["reported_missing_pages"] += number(PAGES, line) or 0
+                # Pinned memory.rs warns only for a nonempty pages vector.
+                pages, quality = numeric_field(line, "pages")
+                if quality == "valid" and pages == 0:
+                    quality = "invalid"
+                quality_counts = memory["fault_numeric_reports"]
+                quality_counts[quality] += 1
+                if quality == "valid" and not (quality_counts["invalid"] or quality_counts["missing"]):
+                    memory["reported_missing_pages"] = (memory["reported_missing_pages"] or 0) + pages
+                else:
+                    memory["reported_missing_pages"] = None
             if "completed raw memory feedback" in line:
                 memory["completed_feedback_reports"] += 1
                 memory["reported_dirty_pages"] += number(DIRTY, line) or 0
@@ -112,6 +121,8 @@ def summarize_readiness(lines, skip=0):
         "memory": memory,
         "note": ("Counts of observed log messages, not unique shaders or proof of correctness. "
                  "Warnings may be rate-limited; missing messages are not evidence of success. "
+                 "Missing-page totals sum only fully numeric observed fault warnings; null means "
+                 "unobserved or incomplete, not zero. Repeated pages are not deduplicated. "
                  "Builder state is the latest observed message, not a live state query; "
                  "a ready builder report means pipelines exist, not that their results are valid. "
                  "Unconditional shutdown has no pipeline count; stale counts are cleared.")
