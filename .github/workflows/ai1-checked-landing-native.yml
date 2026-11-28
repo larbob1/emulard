@@ -1,0 +1,41 @@
+name: AI1 checked texture landing gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai2_texback_checked_landing.rs'
+      - 'probes/ai2_texback_record_resource.rs'
+      - 'docs/ai2-texback-checked-landing.md'
+      - 'tools/validate_ai1_checked_landing_native.py'
+      - 'patches/ai2-checked-landing-common-r2.patch'
+      - 'tools/prepare_ai2_checked_landing.py'
+      - '.github/workflows/ai1-checked-landing-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  texback-landing-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-graphics-checked-landing'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_checked_landing_native.py
+      - name: Exercise eight exact texture landing gates
+        run: python tools/validate_ai1_checked_landing_native.py
