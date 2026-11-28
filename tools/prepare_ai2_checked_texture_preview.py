@@ -11,7 +11,7 @@ UPSTREAM = "51700c6d43a3507fa65e50fe4bb64074ce706cd4"
 PREFIX = "crates/victory-gpu/src/"
 PINS = {
     "patches/ai2-checked-texture-preview-common-r2.patch": "57431b71dc138f7f82c82ea97dd60977530ffeda",
-    "patches/ai2-checked-texture-preview.patch": "ace405dfb747bf79b2c998798a98d613545ac4a8",
+    "patches/ai2-checked-texture-preview.patch": "b007b798e789a766b4293ea9643fe259f1e6e02d",
     "tools/build_runtime.py": "31bc201ad006b304542e8b03405c1a9090d76804",
 }
 SOURCES = {
@@ -33,7 +33,7 @@ COMMON = {
 }
 PATCH = "patches/ai2-checked-texture-preview-common-r2.patch"
 PREVIEW = "patches/ai2-checked-texture-preview.patch"
-POST = "6cfe3116fc5a2674aa509bb99fcceca56908b372"
+POST = "ab963b02ad9a4e68a5fa45513e543d15ab67e41c"
 
 def blob(data):
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()

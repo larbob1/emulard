@@ -1,7 +1,7 @@
 diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.rs
 --- a/crates/victory-gpu/src/texback.rs
 +++ b/crates/victory-gpu/src/texback.rs
-@@ -279,3 +279,328 @@
+@@ -279,3 +279,352 @@
          assert!(track(94, 0x2000, 0x3000).valid.load(Ordering::Acquire));
      }
  }
@@ -98,7 +98,7 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +    }
 +
 +    #[derive(Clone, Copy)]
-+    struct Span { offset: usize, pitch: usize, len: usize }
++    struct Span { offset: usize, pitch: usize, len: usize, rows: usize, row_bytes: usize }
 +    struct Recorded {
 +        target: Target,
 +        buffer: ID3D12Resource,
@@ -171,12 +171,13 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +        let mut footprints = filled(count_usize, D3D12_PLACED_SUBRESOURCE_FOOTPRINT::default())?;
 +        let mut rows = filled(count_usize, 0u32)?;
 +        let mut row_bytes = filled(count_usize, 0u64)?;
-+        let mut spans = filled(count_usize, Span { offset: 0, pitch: 0, len: 0 })?;
++        let mut spans = filled(count_usize, Span { offset: 0, pitch: 0, len: 0, rows: 0, row_bytes: 0 })?;
 +        let mut total = 0u64;
 +        unsafe { host.device.GetCopyableFootprints(&desc, 0, count, 0,
 +            Some(footprints.as_mut_ptr()), Some(rows.as_mut_ptr()),
 +            Some(row_bytes.as_mut_ptr()), Some(&mut total)) };
 +        let mut extent = 0usize;
++        let mut active_end_max = 0usize;
 +        for i in 0..count_usize {
 +            let mip = i % d.mips as usize;
 +            let m = &layout.mips[mip];
@@ -193,15 +194,21 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +            }
 +            let offset = usize::try_from(fp.Offset).map_err(|_| Refusal::Geometry)?;
 +            let pitch = usize::try_from(f.RowPitch).map_err(|_| Refusal::Geometry)?;
-+            let len = pitch.checked_mul(mh as usize).ok_or(Refusal::Geometry)?;
++            let active_rows = usize::try_from(mh).map_err(|_| Refusal::Geometry)?;
++            let active_bytes = usize::try_from(bytes).map_err(|_| Refusal::Geometry)?;
++            let len = pitch.checked_mul(active_rows).ok_or(Refusal::Geometry)?;
 +            let end = offset.checked_add(len).ok_or(Refusal::Geometry)?;
++            let active_end = active_rows.checked_sub(1).and_then(|r| pitch.checked_mul(r))
++                .and_then(|n| offset.checked_add(n)).and_then(|n| n.checked_add(active_bytes))
++                .ok_or(Refusal::Geometry)?;
 +            if offset < extent || len == 0 || end > MAX_BYTES || end > isize::MAX as usize {
 +                return Err(Refusal::Geometry);
 +            }
-+            spans[i] = Span { offset, pitch, len };
++            spans[i] = Span { offset, pitch, len, rows: active_rows, row_bytes: active_bytes };
++            active_end_max = active_end_max.max(active_end);
 +            extent = end;
 +        }
-+        if total == 0 || total > extent as u64 { return Err(Refusal::Geometry); }
++        if total < active_end_max as u64 || total > extent as u64 { return Err(Refusal::Geometry); }
 +        let buffer = host.read_back_buffer(extent as u64).ok_or(Refusal::Buffer)?;
 +        let bd = unsafe { buffer.GetDesc() };
 +        if bd.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || bd.Width < extent as u64 {
@@ -280,7 +287,8 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +
 +    // SAFETY: actual healthy GPU retirement of this execution is established
 +    // by the future caller; target span is live/readable/writable, backing and
-+    // writer/alias exclusion established externally for the entire operation.
++    // writer/alias exclusion established externally for the entire operation;
++    // mapped active row bytes initialized by this execution, never assume padding.
 +    // No proof is manufactured here, and semantic delivery stays unresolved.
 +    unsafe fn land_checked(back: &Recorded) -> LandingReceipt {
 +        let mut r = LandingReceipt::new(back.required);
@@ -295,10 +303,18 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +        if required(layout, ticket) != Ok(back.required)
 +            || bd.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || bd.Width < back.extent as u64
 +            || layout.mips.len().checked_mul(layout.slices as usize) != Some(back.spans.len())
-+            || back.spans.iter().any(|s| s.offset.checked_add(s.len).is_none_or(|end| end > back.extent)) {
++            || back.spans.iter().any(|s| s.rows == 0 || s.row_bytes == 0 || s.row_bytes > s.pitch
++                || s.rows.checked_mul(s.pitch) != Some(s.len)
++                || s.offset.checked_add(s.len).is_none_or(|end| end > back.extent)) {
 +            r.refusal = Some(Refusal::Geometry); return r;
 +        }
 +        let Ok(mut tiled) = filled(back.required, 0u8) else {
++            r.refusal = Some(Refusal::Capacity); return r;
++        };
++        // Allocate initialized pitched scratch before mapping. GPU copy writes
++        // active rows, not necessarily padding; never form a slice over mapped padding.
++        let max_span = back.spans.iter().map(|s| s.len).max().unwrap_or(0);
++        let Ok(mut scratch) = filled(max_span, 0u8) else {
 +            r.refusal = Some(Refusal::Capacity); return r;
 +        };
 +        r.preserve = unsafe { checked_copy(tiled.as_mut_ptr(), ticket.at as *const u8, back.required) };
@@ -313,7 +329,15 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +        let mapping = Mapping(&back.buffer);
 +        if !data.is_null() {
 +            for (i, span) in back.spans.iter().enumerate() {
-+                let linear = unsafe { std::slice::from_raw_parts(data.cast::<u8>().add(span.offset), span.len) };
++                let linear = &mut scratch[..span.len];
++                linear.fill(0);
++                // Healthy retirement must establish initialized active texels.
++                // Checked rows*pitch and row_bytes<=pitch bound both pointer ranges.
++                for row in 0..span.rows {
++                    let at = row * span.pitch;
++                    unsafe { std::ptr::copy_nonoverlapping(data.cast::<u8>().add(span.offset + at),
++                        linear.as_mut_ptr().add(at), span.row_bytes) };
++                }
 +                let mip = i as u32 % layout.desc.mips;
 +                let slice = i as u32 / layout.desc.mips;
 +                if layout.tile(&mut tiled, mip, slice, linear, span.pitch, span.len).is_err() { break; }
