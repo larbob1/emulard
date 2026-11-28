@@ -1,0 +1,9 @@
+# Isolated storage file metadata lifetime witness
+
+AI1 #45 7234072035; AI3 #13 7234061906; claim #45 7234078815.
+Test-only FILE_VTABLE dispatch: baseline/unarmed calls original generic release.
+Candidate decrements exactly once (AcqRel), removes selected Vec entry on final release before freeing the object; registry lock ends before File drop. Generic release, factory, trace predicate/selector and OnceLock unchanged. No trace-off gating, null-output cleanup or worker startup change.
+
+Prepared LF `bee5b9d71cb8f11c060b798485bd8e68391b36bd`, fixture `2071aadf78022c8bde58d12689a5df7f5c7e6220`, postimage `1b34e2f7cb2183155e5e316392538d60abd05386`; exact inverse. Run preparer dry then apply only on disposable pinned paired-wave checkout. External runner must verify complete tree inventory, canonical owned root and nonlink/junction child, dry unchanged and apply only dstorage, exact pins before compilation.
+
+Fresh process per exact ignored filter: `modules::dstorage::tests::storage_file_lifetime_baseline` / `modules::dstorage::tests::storage_file_lifetime_candidate`, debug and release diagnostics, one pass each; four receipts pending AI1 registration. Baseline open/nonlast/after_a/after_b=2/2/2/2, candidate=2/2/1/0; both refcount sequences2/1/0 and other=1. Prefree1/2/3 baseline0/0/0, candidate0/1/2. Numeric stderr row only, no raw pointer/path. Internal distinct labels and null-key absence checked; memory/unknown trace selector unchanged by exact source inverse, not dynamically exercised. No requirement for allocator address reuse. Baseline stale records persist until process exit; no manual registry clear. No native validation, production policy, timing, RSS or FPS claim.
