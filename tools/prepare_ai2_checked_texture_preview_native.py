@@ -12,7 +12,7 @@ UPSTREAM = "51700c6d43a3507fa65e50fe4bb64074ce706cd4"
 PREFIX = "crates/victory-gpu/src/"
 PINS = {
     "tools/prepare_ai2_checked_texture_preview.py": "4cb69cac1d6387f18a91863c7bcfbcdc759dc932",
-    "probes/ai2_checked_texture_preview_native.rs": "6784576ab431784677aa7ed1ffcc4c672d1ae8ee",
+    "probes/ai2_checked_texture_preview_native.rs": "9f5206dd7db04be3022637b32288e4a6b30a8482",
     "probes/ai2_texback_record_resource.rs": "80250d2d44288ba0d708f39c4ed674aec6bc5d30",
     "patches/ai2-checked-texture-preview-common-r2.patch": "57431b71dc138f7f82c82ea97dd60977530ffeda",
     "patches/ai2-checked-texture-preview.patch": "b007b798e789a766b4293ea9643fe259f1e6e02d",
@@ -146,7 +146,7 @@ def main():
     if not proposed.endswith(anchor) or proposed.count(anchor) != 1:
         raise ValueError("nonunique preview final brace")
     final = proposed.replace(anchor, inserted, 1)
-    if final.count(inserted) != 1 or final.replace(inserted, anchor, 1) != proposed or blob(final) != "1f21071c5da1b68f3ccd0ab98c7777326038dbd3":
+    if final.count(inserted) != 1 or final.replace(inserted, anchor, 1) != proposed or blob(final) != "3eeedd9fcf5b758e81c9c04daea04d01c2b50932":
         raise ValueError("native texback splice postimage/inverse")
     writes[path] = (original, final)
     print(f"native={path} preview={POST} postimage={blob(final)}")

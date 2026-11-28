@@ -260,6 +260,12 @@ mod ai2_preview_native {
         let ticket0=recorded(&inventory,0).target.ticket.clone();
         let ticket1=recorded(&inventory,1).target.ticket.clone();
         assert!(!Arc::ptr_eq(&ticket0,&ticket1));
+        {
+            // Canonical COM identity, not merely two interface wrappers or tickets.
+            let a: windows::core::IUnknown=recorded(&inventory,0).buffer.cast().unwrap();
+            let b: windows::core::IUnknown=recorded(&inventory,1).buffer.cast().unwrap();
+            assert!(a.as_raw()!=b.as_raw(), "readback COM identities must be distinct");
+        }
         for (i,ticket) in [&ticket0,&ticket1].into_iter().enumerate() {
             assert_eq!((ticket.owner,ticket.at,ticket.end),(this as usize,pages.at(),pages.at()+SIZE));
             assert_eq!(inventory.entries[i].selected.ordinal,i);
@@ -293,24 +299,31 @@ mod ai2_preview_native {
         }
         // All GPU commands have retired; deliberately invalidate only owned span metadata.
         // Actual landing rejects before preservation/Map; no malformed driver output.
+        // Fresh bytes make even an idempotent re-delivery of the old texture detectable.
+        const GEOMETRY_SENTINEL: u8=0xB9;
+        pages.reset(GEOMETRY_SENTINEL);
+        pages.verify(GEOMETRY_SENTINEL,None);
         let saved=match &mut inventory.entries[0].state {
             State::Recorded(b)=>{let s=b.spans[0];b.spans[0].rows=0;s},_=>panic!("not recorded")
         };
-        let r=unsafe {inventory.evaluate(2,0).unwrap()}.result.unwrap();
+        let receipt=unsafe {inventory.evaluate(2,0).unwrap()};
+        assert_eq!((receipt.execution,receipt.selected.ordinal,receipt.selected.kind),(2,0,(7,3,61)));
+        let r=receipt.result.unwrap();
+        assert_eq!(r.required,SIZE);
         assert_eq!((r.refusal,r.preserve,r.transfer,r.tiles,r.mapped,r.unmapped),
             (Some(Refusal::Geometry),NONE,NONE,0,false,false));
         assert_eq!(r.bytes(),ByteOutcome::NotAttempted);
         assert_eq!(r.semantic,SemanticDelivery::Unresolved);
-        pages.verify(0xD3,Some(1));
+        pages.verify(GEOMETRY_SENTINEL,None);
         match &mut inventory.entries[0].state {State::Recorded(b)=>b.spans[0]=saved,_=>panic!("not recorded")}
         guest::release(this,pages.at());
         assert!(!ticket0.valid.load(Ordering::Acquire));
         assert!(!ticket1.valid.load(Ordering::Acquire));
         drop(inventory);drop(l);drop(allocator);drop(up);drop(texture);drop(ticket0);drop(ticket1);
-        pages.verify(0xD3,Some(1));
+        pages.verify(GEOMETRY_SENTINEL,None);
         unsafe {d.GetDeviceRemovedReason().unwrap();}
         drop(pages);
-        eprintln!("preview_replay executions=2 deliveries=4 geometry_mutated=1 geometry_refused=1 cleanup=1");
+        eprintln!("preview_replay executions=2 deliveries=4 distinct=1 geometry_mutated=1 geometry_refused=1 geometry_sentinel=1 cleanup=1");
     }
 
     #[test]
@@ -327,6 +340,10 @@ mod ai2_preview_native {
         guest::release(this,pages.at());
         assert!(!ticket.valid.load(Ordering::Acquire));
         // No use of the freed title resource pointer after release; retained Target only.
+        // This deliberately tests the stale/no-copy branch: record_checked first rejects
+        // the invalid ticket before querying geometry, allocating or recording any copy.
+        // COPY_SOURCE is required for actual recorded copies; no GPU state is accessed
+        // by this refusal. No transition or submission of this empty list is needed.
         let (allocator,l)=list(d);
         let inventory=unsafe{builder.finish(&l).unwrap()};
         assert_eq!(inventory.entries.len(),1);
