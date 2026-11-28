@@ -14,7 +14,7 @@ Disposable prepared checkout only. The two Rust probes are not compiled by norma
 | fence.rs | b82033550223aa628bd75a700c22465f3a5ca389 |
 | device.rs | dfbf2b2253a8f739e418e7fbcc3a810a66e19252 |
 
-Fixture queue blob 755602d634e6e6c083c7f88611a17a44306cbc76; host helper blob facafd3fcaa231cd04c8002bb1dae95205f7966c.
+Fixture queue blob 755602d634e6e6c083c7f88611a17a44306cbc76; host helper blob 5b218179ed67ac6df956840adbc139021a8bc7de.
 
 ## Actual route and oracle
 
@@ -37,7 +37,7 @@ Observer never takes queue/held/WAITING/submitted locks or re-enters the queue, 
 
 AI1 owns registration after AI2/AI3 exact review and actual builder pins. Prepare with pinned builder in disposable checkout; run `python tools/prepare_ai6_dependent_consumer.py <prepared-checkout>` to verify dry run, then `--apply` only on that isolated tree. Record raw/prepared/fixture/post LF hashes; require exact independently frozen post hashes and no extra modifications. Cargo locked victory-gpu diagnostics debug/release; select exact compiler-artifact test executable and log SHA256. Clean inherited VICTORY_*, RUST_TEST_* and AI6_* environment, set explicit fixture flags:
 
-VICTORY_D3D12_WARP=1, VICTORY_QUEUE_WAIT=1, VICTORY_SPLIT_WAITS=0, VICTORY_CUT_WAITS=0, VICTORY_WAIT_FORCE=0, VICTORY_WAIT_ASK=0, VICTORY_LATE_WAIT=0, VICTORY_ASYNC_SUBMIT=0, VICTORY_JOIN_PARTS=0, VICTORY_ASYNC_PRESENT=0. GPU_TIMING absent, shadow card/relay absent and actual off verified. No default changes.
+VICTORY_D3D12_WARP=1, VICTORY_QUEUE_WAIT=1, VICTORY_SPLIT_WAITS=0, VICTORY_CUT_WAITS=0, VICTORY_WAIT_FORCE=0, VICTORY_WAIT_ASK=0, VICTORY_LATE_WAIT=0, VICTORY_ASYNC_SUBMIT=0, VICTORY_JOIN_PARTS=0, VICTORY_ASYNC_PRESENT=0. VICTORY_CARD_BUFFERS=0, VICTORY_RELAY=0, VICTORY_WIDE_BACK=0 are explicit fixture-only inputs; GPU_TIMING absent. Host preflight asserts the three exact environment values and effective shadow cards/relay/wide_back off, as well as host relay/late/timing off. Actual prepared shadow predicate and blob must be verified before registration (raw upstream shadow blob 4fa43df7932bb6692d164384cd28b1f08f3001ee). No default changes.
 
 Exact ignored filter expected `queue::ai6_dependent_consumer::actual_whole_wait_dependent_consumer` (verify with --list --ignored). Run one fresh direct process per profile with --exact --ignored --test-threads=1 --nocapture, bounded external 60s watchdog, preserve partial streams on timeout and no retry. Expect one named ok and one 1 passed/0 failed/0 ignored result; require exactly one matching strict adapter receipt and ordered event receipt with 2 healthy fences, 64/64 active bytes, 48 combined guard bytes, guest fence 17, forced 0, residue 0. No zero-test success. No native CI invocation from this branch.
 
