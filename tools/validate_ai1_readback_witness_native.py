@@ -126,24 +126,27 @@ def verify_case(stdout, stderr, code, case):
     all_lines = out + err
     if any(re.search(r"\bpanicked at\b|\bthread .* panicked\b", l, re.IGNORECASE) for l in all_lines):
         raise ValueError("unexpected panic")
-    # Catch displaced, malformed or contradictory libtest framing, not
-    # just lines that already match the expected normal output.
-    names = [l for l in out if re.match(r"^\s*test\s", l) and "test result:" not in l]
-    summaries = [l for l in out if "test result:" in l]
-    running = [l for l in out if re.search(r"\brunning\s+[0-9]+\s+tests?\b", l)]
-    if any("test result:" in l or re.match(r"^\s*test\s", l)
-           or re.search(r"\brunning\s+[0-9]+\s+tests?\b", l) for l in err):
+    # Reject displaced or contradictory framing in either stream. Only
+    # canonical stdout lines, in order, can attest a libtest invocation.
+    def framing(line):
+        return ("test result:" in line
+                or re.search(r"\btest\s+\S+\s+\.\.\.", line)
+                or re.match(r"^\s*test\s", line)
+                or re.search(r"\brunning\s+\d+\s+tests?\b", line))
+    if any(framing(l) for l in err):
         raise ValueError("unexpected libtest framing in stderr")
-    if running != ["running 1 test"]:
-        raise ValueError("unexpected test count")
+    frames = [l for l in out if framing(l)]
     if case == 0:
-        summary = r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9]+(?:\.[0-9]+)?s"
-        if code != 0 or names != [f"test {NAMES[0]} ... ok"] or len(summaries) != 1 or not re.fullmatch(summary, summaries[0]):
+        summary = r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; (?:0|[1-9][0-9]*) filtered out; finished in [0-9]+(?:\.[0-9]+)?s"
+        if (code != 0 or len(frames) != 3
+                or frames[:2] != ["running 1 test", f"test {NAMES[0]} ... ok"]
+                or not re.fullmatch(summary, frames[2])):
             raise ValueError("missing exact B0 normal receipt")
     else:
-        # A direct exit can omit the partially flushed test name; no
-        # normal libtest completion, extra name, or contradictory summary.
-        if code != 86 or summaries or names not in ([], [f"test {NAMES[1]} ... "], [f"test {NAMES[1]} ..."]):
+        # A direct exit may omit the partially flushed test name.
+        if code != 86 or frames not in (["running 1 test"],
+                ["running 1 test", f"test {NAMES[1]} ... "],
+                ["running 1 test", f"test {NAMES[1]} ..."]):
             raise ValueError("B1 must be a dedicated witness exit, not a libtest result")
     if any("readback_adapter" in l or "readback_case" in l for l in stdout.splitlines()):
         raise ValueError("receipt in stdout")
