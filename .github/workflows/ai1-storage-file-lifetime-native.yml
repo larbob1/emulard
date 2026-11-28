@@ -1,0 +1,39 @@
+name: AI1 isolated storage file lifetime gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/storage_file_lifetime_native.rs'
+      - 'docs/storage-file-lifetime-native.md'
+      - 'tools/prepare_storage_file_lifetime_native.py'
+      - 'tools/validate_ai1_storage_file_lifetime_native.py'
+      - '.github/workflows/ai1-storage-file-lifetime-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  storage-file-lifetime-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-storage-file-lifetime'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_storage_file_lifetime_native.py
+      - name: Exercise four exact file lifetime cases
+        run: python tools/validate_ai1_storage_file_lifetime_native.py
