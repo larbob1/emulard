@@ -162,6 +162,8 @@ def main():
             if b"ai6_dependent_consumer" in normalized:
                 raise ValueError("fixture already present")
             after = inject(normalized, changes, fixture)
+            if name == "queue.rs" and blob(after) != "a32db134dc909c2bde7bddb6fee87d63cbf8fdd7":
+                raise ValueError("queue postimage differs from reconstructed pin")
             print(f"fixture={file} blob={expected} post={blob(after)} bytes={len(after)}")
             outputs[name] = after.replace(b"\n", b"\r\n") if b"\r\n" in disk else after
         if args.apply:
