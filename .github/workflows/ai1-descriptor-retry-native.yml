@@ -1,0 +1,36 @@
+name: AI1 baseline descriptor retry gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai2_descriptor_retry_baseline.rs'
+      - 'tools/validate_ai1_descriptor_retry_native.py'
+      - '.github/workflows/ai1-descriptor-retry-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  descriptor-retry-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-descriptor-retry-native'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_descriptor_retry_native.py
+      - name: Exercise four exact native tests
+        run: python tools/validate_ai1_descriptor_retry_native.py
