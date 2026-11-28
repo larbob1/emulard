@@ -1,0 +1,15 @@
+# P15/P16/P21 — owned GPU texture transfer gate
+
+AI1 approval #12 7230684346; claim7231205314; base reviewed #113 dca5fb5e05d5a624d4b66aac06d1c7da25fa3b3b; upstream51700c6d43a3507fa65e50fe4bb64074ce706cd4. #114 actual native 6/6 allocation gate passed. Exact raw caf17099100edb798b9eb1913bcc58ffa186201e, prepared fe0526831acf2b0f68caa4163fda83b251c22bb0, unchanged preview ebdd3e1148522d2a1e0ba31fdc23fa79441b4d4b, candidate30d690616b8e215e3019e2c41d12287e247f92ad. New fixture 8ed4ab972a2b693ddb28a18259c4724df77f7033, predicted candidate+one LF+NEW fixture only 681d530256a0a555d3283041234fe731ef324d74. Independent JS reconstruction and exact hash; no Python/native execution. Do not append the previous allocation fixture too.
+
+## Native design
+One exact filter texture::ai2_staging_gpu_transfer::actual_corrected_staging_gpu_transfer in debug/release diagnostics, each pool0 and pool1 in fresh process (4 tests). Sanitize VICTORY_/AI2_ flags, set VICTORY_D3D12_WARP=1, VICTORY_SWEEP=0, VICTORY_STAGING_POOL=0/1, AI2_EXPECT_POOL=0/1; require actual device matching strict software adapter LUID receipt, 5 ordered transfer receipts each, direct test process timeout 120s, individual finite queue wait 30s. Check all raw/prepared/preview/candidate/fixture/append identities before write and re-read. One passing test, zero failed/ignored per process. Preserve contrary receipts. Test uses actual candidate staging_extent, staging_buffer, Staging::detile and Drop, not actual staging() registration or texture::upload. Same device independent direct queue and fence; actual CopyTextureRegion both ways, state transition, completion exactly1 and device health before Map/release; abort isolated process if uncertain after execute, no production recovery policy. Sequential small allocations (max pooled64KiB, max required3840 bytes); full staging padding/tail sentinel verified, only active bytes read back. Independent console linear source construction from shape/pitch/reverse mip order, never Layout::tile/offset; nonuniform per case/slice/mip/z/row/byte. Readback oracle checks every active byte, not undefined GPU padding. Pooled actual pointer reuse verified across cases only after confirmed fence, accounting balanced. No hardware benchmark, non-linear tiled source, draw, title file, asynchronous/replay/publication or real failure proof.
+
+Expected ordered case receipts (pool field explicit, width required in pool0 or65536 in pool1, fence=1):
+case0 subresources1 logical260 required512 active8
+case1 subresources1 logical512 required512 active512
+case2 subresources6 logical3586 required3840 active84
+case3 subresources1 logical2824 required3072 active96
+case4 subresources1 logical272 required512 active32
+
+Five known plane0 single-sample shapes only; compressed BC1 aligned 8x8, not a general odd-mip or plane/MSAA acceptance claim. No attempt to create unsupported descriptors or invalid slices. Unsupported-format/caller refusal remains separate. AI3 review and AI1 native registration required; no shared CI edits, production integration, merge, launch or FPS.
