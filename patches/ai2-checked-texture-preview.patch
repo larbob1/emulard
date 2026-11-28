@@ -1,7 +1,7 @@
 diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.rs
 --- a/crates/victory-gpu/src/texback.rs
 +++ b/crates/victory-gpu/src/texback.rs
-@@ -279,3 +279,299 @@
+@@ -279,3 +279,328 @@
          assert!(track(94, 0x2000, 0x3000).valid.load(Ordering::Acquire));
      }
  }
@@ -33,6 +33,27 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +    struct Entry { selected: Selected, state: State }
 +    struct RecordingBuilder { entries: Vec<Entry>, poisoned: bool }
 +    struct RecordingInventory { entries: Vec<Entry> }
++    struct ExecutionReceipt {
++        execution: u64,
++        selected: Selected,
++        result: Result<LandingReceipt, Refusal>,
++    }
++    impl RecordingInventory {
++        // SAFETY: for this execution the actual GPU retirement and external
++        // backing/writer/alias prerequisites of land_checked hold. Execution
++        // is an external label, not a proof. Every call evaluates afresh.
++        unsafe fn evaluate(&self, execution: u64, ordinal: usize)
++            -> Option<ExecutionReceipt>
++        {
++            let entry = self.entries.get(ordinal)?;
++            let result = match &entry.state {
++                State::Refused(reason) => Err(*reason),
++                State::Pending(_) => Err(Refusal::Pending),
++                State::Recorded(back) => Ok(unsafe { land_checked(back) }),
++            };
++            Some(ExecutionReceipt { execution, selected: entry.selected, result })
++        }
++    }
 +
 +    impl RecordingBuilder {
 +        fn new() -> Self { Self { entries: Vec::new(), poisoned: false } }
@@ -250,6 +271,13 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +        fn bytes(&self) -> ByteOutcome { classify(self.transfer, self.required) }
 +    }
 +
++    struct Mapping<'a>(&'a ID3D12Resource);
++    impl Drop for Mapping<'_> {
++        fn drop(&mut self) {
++            unsafe { self.0.Unmap(0, Some(&D3D12_RANGE { Begin: 0, End: 0 })) };
++        }
++    }
++
 +    // SAFETY: actual healthy GPU retirement of this execution is established
 +    // by the future caller; target span is live/readable/writable, backing and
 +    // writer/alias exclusion established externally for the entire operation.
@@ -266,7 +294,7 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +        let bd = unsafe { back.buffer.GetDesc() };
 +        if required(layout, ticket) != Ok(back.required)
 +            || bd.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || bd.Width < back.extent as u64
-+            || back.spans.len() != layout.mips.len() * layout.slices as usize
++            || layout.mips.len().checked_mul(layout.slices as usize) != Some(back.spans.len())
 +            || back.spans.iter().any(|s| s.offset.checked_add(s.len).is_none_or(|end| end > back.extent)) {
 +            r.refusal = Some(Refusal::Geometry); return r;
 +        }
@@ -282,6 +310,7 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +            r.refusal = Some(Refusal::Map); return r;
 +        }
 +        r.mapped = true;
++        let mapping = Mapping(&back.buffer);
 +        if !data.is_null() {
 +            for (i, span) in back.spans.iter().enumerate() {
 +                let linear = unsafe { std::slice::from_raw_parts(data.cast::<u8>().add(span.offset), span.len) };
@@ -291,7 +320,7 @@ diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.
 +                r.tiles += 1;
 +            }
 +        }
-+        unsafe { back.buffer.Unmap(0, Some(&D3D12_RANGE { Begin: 0, End: 0 })) };
++        drop(mapping);
 +        r.unmapped = true;
 +        if data.is_null() || r.tiles != back.spans.len() {
 +            r.refusal = Some(if data.is_null() { Refusal::Map } else { Refusal::Tile }); return r;
