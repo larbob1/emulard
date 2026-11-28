@@ -1,0 +1,7 @@
+# AI6 direct guest queue Signal baseline (P18/P24)
+
+Scratch only, pristine integration 08472987ffee011796d48d7c90114439a6a68908, upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4. Approved #46 7233936822 and 7233973674, claim 7233986641. No production policy, marker suppression, shared registration, or title access. Prior #137 is separate.
+
+D0 actual owned synchronous producer readback: GPU fence 1, 64 pattern bytes and 24 guards, guest 0 before real same-queue Signal and 17 after, normal release. D1 same producer with exact one-shot resource/destination/row tuple refusal before Map: all 88 bytes unchanged, healthy GPU 1, direct Signal S_OK and 17, retain objects until dedicated exit 87 (not libtest pass). I0 separate process: fresh queue/fence with no work, 0 to 17, GPU counters 0, normal cleanup; not general independence proof. No marker, consumer or held injection; no optional event. Require actual held/WAITING empty and effective synchronous settings. No timing or FPS claim.
+
+Preparer pins exact six raw/prepared sources from #137. Queue append only, host four exact test-only observers. Reconstructed queue a00dd7fb283b4c13de6f0dae781130331e5d9434, host bc419ee340a05a1732c5272955b76919adb24952; actual builder preparation and native results pending. Run D0, D1, I0 separately in debug/release via AI1 registration after AI3 exact source review, watchdog and exact ordered receipt checks. D0/I0 normal exit 0 with one nonempty exact test; D1 only dedicated exit 87 with exact adverse receipt. Never treat abort or empty filter as evidence.
