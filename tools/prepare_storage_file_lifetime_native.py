@@ -12,9 +12,9 @@ RAW = "5fe9aba9aa336dcaace3c21e72040de4efb1e0dd"
 PREPARED = "bee5b9d71cb8f11c060b798485bd8e68391b36bd"
 BUILDER = "31bc201ad006b304542e8b03405c1a9090d76804"
 FIXTURE = "3860879590b6123c2609b6059a03d1ff7a40ae3d"
-POST = "e30f2a01f84ac9bb0e37e7a3415a3902ce12f726"
-OLD = "    release::<File> as *const (),"
-NEW = "    #[cfg(not(test))]\n    release::<File> as *const (),\n    #[cfg(test)]\n    tests::file_release_review as *const (),"
+POST = "cde18978122629f60de820d419fc189367dae142"
+OLD = "static FILE_VTABLE: Methods<8> = Methods([\n    missing::<0> as *const (),\n    add_ref_instance::<File> as *const (),\n    release::<File> as *const (),"
+NEW = "#[cfg(not(test))]\nconst FILE_RELEASE_SLOT: extern \"system\" fn(*mut Instance<File>) -> u32 = release::<File>;\n#[cfg(test)]\nconst FILE_RELEASE_SLOT: extern \"system\" fn(*mut Instance<File>) -> u32 = tests::file_release_review;\n\nstatic FILE_VTABLE: Methods<8> = Methods([\n    missing::<0> as *const (),\n    add_ref_instance::<File> as *const (),\n    FILE_RELEASE_SLOT as *const (),"
 ANCHOR = "    #[test]\n    fn raw_and_zlib_reads_from_a_file() {"
 
 def blob(data):
