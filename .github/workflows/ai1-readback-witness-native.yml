@@ -1,0 +1,39 @@
+name: AI1 owned B0 B1 readback witness gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai6_readback_witness.rs'
+      - 'probes/ai6_readback_witness_host.rs'
+      - 'tools/prepare_ai6_readback_witness.py'
+      - 'tools/validate_ai1_readback_witness_native.py'
+      - '.github/workflows/ai1-readback-witness-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  readback-witness-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-readback-witness-native'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_readback_witness_native.py
+      - name: Exercise two normal controls and two dedicated witnesses
+        run: python tools/validate_ai1_readback_witness_native.py
