@@ -47,14 +47,14 @@ def build(target, release):
         raise ValueError(f"unexpected test executables: {artifacts}")
     return artifacts[0]
 
-REVIEWED = "eea95f8cf57312ed732c5d16d24e4bd8d2c7943a"
+REVIEWED = "2dc0f8609baebb97e86f91d82f08fe50cec4f2c3"
 PINS = {
-    "tools/prepare_storage_file_lifetime_native.py": "de79c7b40c0838f5ee170efdeb534befd6b99918",
+    "tools/prepare_storage_file_lifetime_native.py": "67e2c1e51fe846b0e39b655949b9b355f2fdd001",
     "probes/storage_file_lifetime_native.rs": "3860879590b6123c2609b6059a03d1ff7a40ae3d",
-    "docs/storage-file-lifetime-native.md": "4e998f6e5ab8f32711a5f7834fb48d018a5f2b5c",
+    "docs/storage-file-lifetime-native.md": "ee454d3221af1d1d1f51cd240630b2e15e347709",
     "tools/build_runtime.py": BUILDER,
 }
-POST = {"crates/victory-hle/src/modules/dstorage.rs": "e30f2a01f84ac9bb0e37e7a3415a3902ce12f726"}
+POST = {"crates/victory-hle/src/modules/dstorage.rs": "cde18978122629f60de820d419fc189367dae142"}
 MANIFESTS = {
     "crates/victory-hle/Cargo.toml": "a2fa943c5095cfd8256ee3e9a7c5d2a51cde6ac7",
     "Cargo.toml": "4e21b692d66103d990003164b6f1e4f700bc4086",
