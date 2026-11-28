@@ -57,7 +57,7 @@ def env():
     return result
 
 
-def run(args, cwd, timeout, capture=False):
+def run(args, cwd, timeout, capture=False, strict_stderr=False):
     args = [str(a) for a in args]
     try:
         p = subprocess.run(args, cwd=cwd, env=env(), timeout=timeout,
@@ -69,6 +69,8 @@ def run(args, cwd, timeout, capture=False):
         if capture:
             print(f"command failed stdout={p.stdout!r} stderr={p.stderr!r}", flush=True)
         raise subprocess.CalledProcessError(p.returncode, args)
+    if strict_stderr:
+        need(capture and p.stderr == b"", f"unexpected parent stderr: {p.stderr!r}")
     return p.stdout if capture else None
 
 
@@ -109,6 +111,11 @@ def ordinary(path, directory):
         else:
             need(stat.S_ISDIR(info.st_mode), "nonordinary directory")
     return path
+
+
+def path_identity(path, directory):
+    info = ordinary(path, directory).lstat()
+    return info.st_dev, info.st_ino
 
 
 def sha256(path):
@@ -229,8 +236,12 @@ def main():
         ordinary(owned, True)
         need(ROOT not in owned.parents and owned not in ROOT.parents and ROOT != owned,
              "scratch root overlaps candidate")
+        owned_id = path_identity(owned, True)
         runtime = owned / "runtime"
         identity, prepared = prepare(runtime, core)
+        runtime_id = path_identity(runtime, True)
+        need(runtime.parent.samefile(owned) and runtime_id != owned_id,
+             "runtime root identity overlap")
         pin = inv_digest(prepared)
         package, target = package_identity(runtime)
         need(snap(core, runtime, identity) == prepared, "metadata changed source")
@@ -239,25 +250,47 @@ def main():
             output = owned / profile
             exe, digest = build(runtime, output, profile, package, target, pin)
             need(snap(core, runtime, identity) == prepared, "build changed source")
-            receipts.append((profile, output, exe, digest))
+            root_id = path_identity(output, True)
+            exe_id = path_identity(exe, False)
+            need(output.parent.samefile(owned) and root_id not in (owned_id, runtime_id),
+                 "output root identity overlap")
+            need(all(not output.samefile(r[1]) and not exe.samefile(r[2]) for r in receipts),
+                 "aliased profile roots or executables")
+            receipts.append((profile, output, exe, digest, root_id, exe_id))
         args = [sys.executable, "-B", ROOT / PARENT, "--runtime", runtime]
-        for profile, output, exe, digest in receipts:
+        for profile, output, exe, digest, _, _ in receipts:
             args.extend(["--" + profile, exe, "--" + profile + "-root", output,
                          "--" + profile + "-sha256", digest])
-        for _, _, exe, digest in receipts:
-            need(sha256(exe) == digest, "executable changed after build")
-        result = run(args, runtime, 540, capture=True)
+        def verify_identities():
+            need(path_identity(owned, True) == owned_id and
+                 path_identity(runtime, True) == runtime_id and runtime.parent.samefile(owned),
+                 "owned/runtime root changed")
+            for _, output, exe, digest, root_id, exe_id in receipts:
+                need(path_identity(output, True) == root_id and output.parent.samefile(owned),
+                     "profile root changed")
+                need(path_identity(exe, False) == exe_id and sha256(exe) == digest,
+                     "executable identity or bytes changed")
+        verify_identities()
+        result = run(args, runtime, 540, capture=True, strict_stderr=True)
         print(result.decode("ascii", errors="strict"), end="", flush=True)
         lines = result.decode("ascii").splitlines()
         need(lines.count("runner_complete profiles=2 cases=4") == 1 and
              lines[-1] == "runner_complete profiles=2 cases=4", "missing final parent receipt")
-        expected = [(profile, case, digest) for profile, _, _, digest in receipts
-                    for case in ("prearm", "terminal")]
-        observed = [tuple(m.groups()) for line in lines if (m := re.fullmatch(
-            r"case_accepted profile=(debug|release) case=(prearm|terminal) sha256=([0-9a-f]{64}) .*", line))]
-        need(observed == expected, "wrong accepted case identities/order")
-        for _, _, exe, digest in receipts:
-            need(sha256(exe) == digest, "executable changed after parent")
+        expected = []
+        for profile, _, _, digest, _, _ in receipts:
+            prefix = f"case_accepted profile={profile} case="
+            tail = f" sha256={digest} discovered=221 ignored=8 "
+            expected.extend([
+                prefix + "prearm" + tail + "exit=0",
+                prefix + "terminal" + tail +
+                f"exit=0xe6000001 receipt={(0x41364254, 1, 1, 4, 0x434F4D54, 0, 0, 0)}",
+                f"profile_complete profile={profile} cases=2",
+            ])
+        expected.append("runner_complete profiles=2 cases=4")
+        observed = [line for line in lines if line.startswith(
+            ("case_accepted", "profile_complete", "runner_complete"))]
+        need(observed == expected, "wrong accepted case/profile receipts or order")
+        verify_identities()
         need(snap(core, runtime, identity) == prepared, "source changed during parent")
         verify_checkout(ns.expected_head)
     print("gate_complete profiles=2 cases=4 scope=isolated-terminal-fixture", flush=True)
