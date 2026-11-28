@@ -16,7 +16,7 @@ pub(crate) mod ai6_readback_witness {
     const ROW: usize = 32;
     const PITCH: usize = 40;
     const OFFSET: usize = 4;
-    const SENTINEL: [u8; OUT] = [0xe7; OUT];
+    const SENTINEL: [u8; OUT] = [0xff; OUT];
     fn byte(i: usize) -> u8 { ((i * 37 + 19) % 251) as u8 }
     fn expected(consumer: bool) -> [u8; OUT] {
         let mut out = SENTINEL;
@@ -31,7 +31,8 @@ pub(crate) mod ai6_readback_witness {
     struct Observer {
         a: usize, b: usize, marker: usize, fence: usize, consumer_queue: usize,
         phase: usize, events: [u8; 8], expected_a: [u8; OUT], expected_b: [u8; OUT],
-        adverse: bool, producer_resource: usize, selected: u8, refused: u8,
+        adverse: bool, producer_resource: usize, consumer_resource: usize,
+        consumer_selected: bool, selected: u8, refused: u8,
         published: u8, stopped: bool,
     }
     thread_local! {
@@ -89,7 +90,9 @@ pub(crate) mod ai6_readback_witness {
                 if o.adverse { o.refused = 1; skip = true; }
             } else {
                 require(!o.adverse && o.phase == 5 && at == o.b + OFFSET);
+                require(buffer.as_raw() as usize == o.consumer_resource && !o.consumer_selected);
                 require((row,rows,pitch) == (ROW,2,PITCH) && o.selected == 1);
+                o.consumer_selected = true;
             }
         });
         skip
@@ -105,6 +108,7 @@ pub(crate) mod ai6_readback_witness {
                 step(o,2);
             }
             5 => {
+                require(o.consumer_selected);
                 require(bytes_at(o.a) == o.expected_a && bytes_at(o.b) == o.expected_b);
                 require(marker_value(o.marker) == MARK && guest(o) == 0);
                 step(o,5);
@@ -279,7 +283,8 @@ pub(crate) mod ai6_readback_witness {
             *s.borrow_mut() = Some(Observer { a:pa as usize,b:pb as usize,marker:pm as usize,
                 fence:fence as usize,consumer_queue:b as usize,phase:0,events:[255;8],
                 expected_a:expected(false),expected_b:expected(true), adverse,
-                producer_resource:ra.as_raw() as usize, selected:0, refused:0, published:0, stopped:false });
+                producer_resource:ra.as_raw() as usize, consumer_resource:rb.as_raw() as usize,
+                consumer_selected:false, selected:0, refused:0, published:0, stopped:false });
         });
         execute(b,1,&lb);
         require(signal(b,fence,GUEST) == S_OK);
@@ -303,7 +308,7 @@ pub(crate) mod ai6_readback_witness {
             // Execution guards have returned; separate short snapshots.
             with_observer(|o| {
                 require(o.stopped && o.phase == 3 && o.events[..3] == [0,1,2]);
-                require(o.selected == 1 && o.refused == 1 && o.published == 1);
+                require(o.selected == 1 && o.refused == 1 && o.published == 1 && !o.consumer_selected);
                 require(marker_value(o.marker) == MARK && guest(o) == 0);
                 require(bytes_at(o.a) == SENTINEL && bytes_at(o.b) == SENTINEL);
             });
@@ -335,6 +340,7 @@ pub(crate) mod ai6_readback_witness {
         crate::host::ai6_readback_witness_finish(h,2);
         let observed = OBS.with(|s| s.borrow_mut().take().unwrap_or_else(|| std::process::abort()));
         assert_eq!(observed.events,[0,1,2,3,4,5,6,7]);
+        assert!(observed.consumer_selected);
         assert_eq!((observed.selected,observed.refused,observed.published,observed.stopped),(1,0,1,false));
         unsafe {
             drop_object(lb); drop_object(la); drop_object(allocator);
