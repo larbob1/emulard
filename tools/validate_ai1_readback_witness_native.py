@@ -121,18 +121,30 @@ def direct(args, target, env):
 def verify_case(stdout, stderr, code, case):
     if case not in (0, 1):
         raise ValueError("unsupported case")
-    names = [l for l in stdout.splitlines() if re.match(r"^test \S+ \.\.\. ", l)]
-    summaries = [l for l in stdout.splitlines() if l.startswith("test result:")]
+    out = stdout.splitlines()
+    err = stderr.splitlines()
+    all_lines = out + err
+    if any(re.search(r"\bpanicked at\b|\bthread .* panicked\b", l, re.IGNORECASE) for l in all_lines):
+        raise ValueError("unexpected panic")
+    # Catch displaced, malformed or contradictory libtest framing, not
+    # just lines that already match the expected normal output.
+    names = [l for l in out if re.match(r"^\s*test\s", l) and "test result:" not in l]
+    summaries = [l for l in out if "test result:" in l]
+    running = [l for l in out if re.search(r"\brunning\s+[0-9]+\s+tests?\b", l)]
+    if any("test result:" in l or re.match(r"^\s*test\s", l)
+           or re.search(r"\brunning\s+[0-9]+\s+tests?\b", l) for l in err):
+        raise ValueError("unexpected libtest framing in stderr")
+    if running != ["running 1 test"]:
+        raise ValueError("unexpected test count")
     if case == 0:
         summary = r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; finished in [0-9]+(?:\.[0-9]+)?s"
         if code != 0 or names != [f"test {NAMES[0]} ... ok"] or len(summaries) != 1 or not re.fullmatch(summary, summaries[0]):
             raise ValueError("missing exact B0 normal receipt")
     else:
-        # libtest may print the test prefix before the process exits.
-        if code != 86 or summaries or any(l.strip() != f"test {NAMES[1]} ..." for l in names):
+        # A direct exit can omit the partially flushed test name; no
+        # normal libtest completion, extra name, or contradictory summary.
+        if code != 86 or summaries or names not in ([], [f"test {NAMES[1]} ... "], [f"test {NAMES[1]} ..."]):
             raise ValueError("B1 must be a dedicated witness exit, not a libtest result")
-        if "test result:" in stderr or any(re.search(r"\b(?:panicked at|thread .* panicked)\b", l) for l in stderr.splitlines()):
-            raise ValueError("B1 unexpected panic or test summary")
     if any("readback_adapter" in l or "readback_case" in l for l in stdout.splitlines()):
         raise ValueError("receipt in stdout")
     rows = [l for l in stderr.splitlines() if "readback_adapter" in l or "readback_case" in l]
@@ -159,6 +171,7 @@ def run_exact(exe, target, release, case):
         raise ValueError("exact ignored listing")
     p = direct([str(exe), NAMES[case], "--exact", "--ignored", "--test-threads=1",
                 "--format", "pretty", "--nocapture"], target, env)
+    print(f"child_exit case=B{case} code={p.returncode}", flush=True)
     verify_case(p.stdout, p.stderr, p.returncode, case)
     print(f"accepted case=B{case} exit={p.returncode} kind={'normal' if case == 0 else 'witness'}", flush=True)
 
@@ -206,8 +219,13 @@ def main():
         subprocess.run(["git", "diff", "--check"], cwd=target, check=True)
         for release in (False, True):
             exe = build(target, release)
+            digest = hashlib.sha256(exe.read_bytes()).hexdigest()
             for case in (0, 1):
+                if hashlib.sha256(exe.read_bytes()).hexdigest() != digest:
+                    raise ValueError("profile executable changed before case")
                 run_exact(exe, target, release, case)
+                if hashlib.sha256(exe.read_bytes()).hexdigest() != digest:
+                    raise ValueError("profile executable changed after case")
     print("Two B0 normal passes and two B1 dedicated adverse witnesses; no production failure fix, gameplay or FPS proof.")
 
 if __name__ == "__main__":
