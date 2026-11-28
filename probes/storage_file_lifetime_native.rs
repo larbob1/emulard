@@ -28,8 +28,8 @@
         left
     }
 
-    fn file_lifetime_ref(object: *mut c_void, slot: usize) -> u32 {
-        let f: extern "system" fn(*mut c_void) -> u32 = call(object, slot);
+    fn file_lifetime_ref(object: *mut c_void, byte_offset: usize) -> u32 {
+        let f: extern "system" fn(*mut c_void) -> u32 = call(object, byte_offset);
         f(object)
     }
 
@@ -64,23 +64,23 @@
         let snapshot = || file_lifetime_snapshot(ak, bk, &la, &lb);
         let s0 = snapshot();
         assert_eq!(s0, (2, 1, 1, true, true));
-        let a2 = file_lifetime_ref(a, 1);
-        let b2 = file_lifetime_ref(b, 1);
+        let a2 = file_lifetime_ref(a, 0x08);
+        let b2 = file_lifetime_ref(b, 0x08);
         assert_eq!((a2, b2), (2, 2));
-        let a1 = file_lifetime_ref(a, 2);
-        let b1 = file_lifetime_ref(b, 2);
+        let a1 = file_lifetime_ref(a, 0x10);
+        let b1 = file_lifetime_ref(b, 0x10);
         assert_eq!((a1, b1), (1, 1));
         let s1 = snapshot();
         assert_eq!(s1, s0);
         let p1 = FILE_LIFETIME_PREFREE.load(Ordering::Relaxed);
         assert_eq!(p1, 0);
-        let a0 = file_lifetime_ref(a, 2);
+        let a0 = file_lifetime_ref(a, 0x10);
         assert_eq!(a0, 0);
         let s2 = snapshot();
         assert_eq!(s2, if candidate { (1, 0, 1, false, true) } else { s0 });
         let p2 = FILE_LIFETIME_PREFREE.load(Ordering::Relaxed);
         assert_eq!(p2, u32::from(candidate));
-        let b0 = file_lifetime_ref(b, 2);
+        let b0 = file_lifetime_ref(b, 0x10);
         assert_eq!(b0, 0);
         let s3 = snapshot();
         assert_eq!(s3, if candidate { (0, 0, 0, false, false) } else { s0 });
