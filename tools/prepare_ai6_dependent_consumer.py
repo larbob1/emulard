@@ -27,7 +27,7 @@ PINS = {
 }
 FIXTURES = {
     "queue.rs": ("ai6_dependent_consumer.rs", "755602d634e6e6c083c7f88611a17a44306cbc76"),
-    "host.rs": ("ai6_dependent_consumer_host.rs", "facafd3fcaa231cd04c8002bb1dae95205f7966c"),
+    "host.rs": ("ai6_dependent_consumer_host.rs", "5b218179ed67ac6df956840adbc139021a8bc7de"),
 }
 
 def blob(data):
