@@ -100,7 +100,7 @@ def parse_receipts(stdout, stderr, case):
     if not m:
         raise ValueError("malformed checked landing receipt")
     extent, width = map(int, m.groups())
-    if not 0 < extent <= 65536 or not extent <= width < 2**64:
+    if not 2816 <= extent <= 65536 or extent % 256 != 0 or not extent <= width < 2**64:
         raise ValueError("readback extent/width")
     return ah, al, extent, width
 
