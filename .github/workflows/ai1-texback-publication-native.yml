@@ -1,0 +1,38 @@
+name: AI1 owned texture landing gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai2_texback_publication_baseline.rs'
+      - 'docs/ai2-texback-publication-baseline.md'
+      - 'tools/validate_ai1_texback_publication_native.py'
+      - '.github/workflows/ai1-texback-publication-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  texback-publication-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-texback-publication-native'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_texback_publication_native.py
+      - name: Exercise four exact texture landing gates
+        run: python tools/validate_ai1_texback_publication_native.py
