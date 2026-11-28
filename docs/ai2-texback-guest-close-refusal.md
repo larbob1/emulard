@@ -1,0 +1,17 @@
+# R3 required texture readback refusal baseline (P13/P14/P21)
+
+AI1 approved #11 7233307109; AI3 conditional design #13 7232041729; AI6 nonoverlap #12 7233272002; AI2 claim #12 7233480935. Pristine integration 08472987ffee011796d48d7c90114439a6a68908, upstream 51700c6d43a3507fa65e50fe4bb64074ce706cd4. No composition with R2 or CPU candidates. Scratch-only, not a production correction.
+
+Prepare an independent disposable paired-wave checkout with pinned builder. Python 3.12+; run `python tools/prepare_ai2_guest_close_refusal.py <checkout>` (dry-run), then the same command with --apply. Discard the scratch checkout on failure. Require canonical isolated root, raw/prepared and manifest pins, exact fixture pins, unique reversible record seam and append, full non-.git inventory (exactly four changes), actual postimages, git diff --check. Coordinator owns separate native registration after AI3 independent source review. Native execution not attempted.
+
+| Source | Prepared blob | Final predicted blob | LF bytes |
+|---|---|---|---:|
+| host.rs | 88acbb3b2cf550cdf2303685fcc32249f9e46328 | c254622dd955adaac0d2191faf35c9f7c1404d23 | 453335 |
+| texback.rs | 3102a4f9ed2f80c86a28fcc5070b855143279574 | daa97476498b80432032f5cb2965e0531aecd304 | 14667 |
+| resource.rs | 215122c8728e95b3748b135f6c760f0690a959d8 | 314c10076c9fa7f07a8fb24f69b4c44f3b758185 | 161182 |
+| list.rs | 3bf89f3c9b17f14c2ec4fa4480e3378e6ac8857e | 791ef1c84af00f536821d07a4b3f3bed1633b58f | 89429 |
+Intermediate texback seam a0eba6f9d4b81fcab3f50691657e72421fbe5c4a. Static reconstruction from exact upstream blobs and host 11+5/resource 2 hunks, all inverse checked. List and texback unchanged by paired preparation prior to scratch. Exact resource helper 80250d2d44288ba0d708f39c4ed674aec6bc5d30 from accepted #128/#134.
+
+Actual guest ABI allocator/create_list/close/release, actual HostList identity before/after, real selected target and retained Arc. One-shot selected-Arc seam immediately before readback allocation; both modes record fixed footprint and checked extent and consume once; no assertions/logging/allocation in seam. Control passes through; adverse returns None before allocation. No fabricated stale ticket, OOM or device fault. Both require S_OK guest HRESULT, actual host present, wanted drained, current ticket, full 65536 bytes unchanged, healthy device and zero submission/fence. Positive recorded Back identity/footprints and Width>=extent; adverse no Back, Width explicitly unavailable. Host Close HRESULT is not independently observed. Release guest list then allocator before resource, all borrows ended; verify registry cleanup and invalidated ticket, not global retirement. No shader execution, real remap, submission, landing, notification or production policy proof.
+
+Native gate: two exact ignored names host::ai2_guest_close_refusal::actual_guest_close_control and ::actual_guest_close_refusal in fresh processes per debug/release (2 normal controls + 2 adverse normal witnesses). WARP1 SWEEP0 TEXTURE_BACK=7x3f61 COPY_MODE/GPU_TIMING absent; full/ignored discovery exact names, exit0, ordered normal libtest one-pass, watchdog, executable digest before/after, strict two stderr receipts guest_close_adapter and guest_close_case, actual WARP LUID. Independent footprint oracle four R8 array/mip shapes (7x3,3x1,7x3,3x1), one plane, row bytes, 256 pitch alignment, 512 offsets, nonoverlap and full extent. Require positive width>=extent or literal unavailable adverse. No native compile or execution yet; 0/4. No gameplay/FPS claim.
