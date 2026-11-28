@@ -1,0 +1,46 @@
+name: AI1 R2 common source parity
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'tools/audit_ai1_r2_common_parity.py'
+      - 'patches/paired-wave-texback-selection-r2.patch'
+      - '.github/workflows/ai1-r2-common-parity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  source-audit:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-r2-common-parity'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify candidate
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/checkout@v4
+        with:
+          ref: 5c961054125590ab0ece0484154602a235f0f81c
+          path: ai1-pr96
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 773f539df1275e7dc29a6f3000d35060c6a60e8b
+          path: ai1-pr95
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/audit_ai1_r2_common_parity.py
+      - name: Compare independently prepared source arms
+        run: python tools/audit_ai1_r2_common_parity.py --helper ai1-pr96 --preview ai1-pr95
