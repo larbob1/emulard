@@ -24,6 +24,8 @@ PINS = {
     "list.rs": ("3bf89f3c9b17f14c2ec4fa4480e3378e6ac8857e",)*2,
     "fence.rs": ("b82033550223aa628bd75a700c22465f3a5ca389",)*2,
     "device.rs": ("dfbf2b2253a8f739e418e7fbcc3a810a66e19252",)*2,
+    "shadow.rs": ("4fa43df7932bb6692d164384cd28b1f08f3001ee",
+                  "40f1ae02506de251d51e00ebfd36f58e58e7621b"),
 }
 FIXTURES = {
     "queue.rs": ("ai6_dependent_consumer.rs", "755602d634e6e6c083c7f88611a17a44306cbc76"),
@@ -162,12 +164,16 @@ def main():
             if b"ai6_dependent_consumer" in normalized:
                 raise ValueError("fixture already present")
             after = inject(normalized, changes, fixture)
-            if name == "queue.rs" and blob(after) != "a32db134dc909c2bde7bddb6fee87d63cbf8fdd7":
-                raise ValueError("queue postimage differs from reconstructed pin")
+            expected_post = {
+                "queue.rs": "a32db134dc909c2bde7bddb6fee87d63cbf8fdd7",
+                "host.rs": "0bd298de41f2db3f196d64bddffb1555d93ce226",
+            }[name]
+            if blob(after) != expected_post:
+                raise ValueError(f"{name} postimage differs from reconstructed pin")
             print(f"fixture={file} blob={expected} post={blob(after)} bytes={len(after)}")
             outputs[name] = after.replace(b"\n", b"\r\n") if b"\r\n" in disk else after
         if args.apply:
-            for name, data in outputs.items():
+            for name in originals:
                 if (root / (PREFIX + name)).read_bytes() != originals[name][0]:
                     raise ValueError(f"source changed after preflight: {name}")
             # Disposable checkout only. On I/O failure retain evidence; no
@@ -175,8 +181,12 @@ def main():
             for name, data in outputs.items():
                 path = root / (PREFIX + name)
                 path.write_bytes(data)
-                if path.read_bytes() != data:
+                written = path.read_bytes()
+                if written != data or blob(lf(written)) != blob(lf(data)):
                     raise ValueError(f"written postimage differs: {name}")
+            for name in originals.keys() - outputs.keys():
+                if (root / (PREFIX + name)).read_bytes() != originals[name][0]:
+                    raise ValueError(f"untouched source changed: {name}")
             print("applied two scratch-only observer/fixture files")
         else:
             print("dry run; no files written")
