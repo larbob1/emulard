@@ -59,8 +59,7 @@ pub(crate) fn ai6_direct_signal_witness_finish(h: &Host, expected: u64) {
 
 // Check one owned buffer obligation and absence of deferred marker/texture work.
 #[cfg(all(test, feature = "diagnostics"))]
-pub(crate) fn ai6_direct_signal_witness_check_list(list: &HostList) {
-    let deferred = list.deferred();
+fn ai6_direct_signal_witness_check_deferred(deferred: &Deferred) {
     if deferred.backs.len() != 1 || !deferred.writes.is_empty() ||
         !deferred.texture_backs.is_empty() || !deferred.back_wanted.is_empty() {
         std::process::abort();
@@ -68,8 +67,13 @@ pub(crate) fn ai6_direct_signal_witness_check_list(list: &HostList) {
 }
 
 #[cfg(all(test, feature = "diagnostics"))]
-fn ai6_direct_signal_witness_readback(list: &HostList) {
+pub(crate) fn ai6_direct_signal_witness_check_list(list: &HostList) {
+    ai6_direct_signal_witness_check_deferred(&list.deferred());
+}
+
+#[cfg(all(test, feature = "diagnostics"))]
+fn ai6_direct_signal_witness_readback(list: &HostList, deferred: &Deferred) {
     if !crate::queue::ai6_direct_signal_witness::active() { return; }
-    ai6_direct_signal_witness_check_list(list);
+    ai6_direct_signal_witness_check_deferred(deferred);
     crate::queue::ai6_direct_signal_witness::readback(std::ptr::from_ref(list) as usize);
 }
