@@ -1,0 +1,64 @@
+diff --git a/crates/victory-gpu/src/host.rs b/crates/victory-gpu/src/host.rs
+--- a/crates/victory-gpu/src/host.rs
++++ b/crates/victory-gpu/src/host.rs
+@@ -6391,12 +6391,24 @@
+         if !crate::texback::wanted(resource) {
+             return;
+         }
+-        let mut deferred = self.deferred();
+-        if !deferred.back_wanted.iter().any(|target| target.owner() == resource as usize)
+-            && let Some(target) = crate::texback::Target::new(resource)
+-        {
+-            deferred.back_wanted.push(target);
+-        }
++        let replaced = {
++            let mut deferred = self.deferred();
++            if let Some(index) = deferred.back_wanted.iter().position(|target| target.owner() == resource as usize) {
++                if deferred.back_wanted[index].is_current() {
++                    None
++                } else {
++                    crate::texback::Target::new(resource)
++                        .map(|target| std::mem::replace(&mut deferred.back_wanted[index], target))
++                }
++            } else {
++                if let Some(target) = crate::texback::Target::new(resource) {
++                    deferred.back_wanted.push(target);
++                }
++                None
++            }
++        };
++        // Drop an obsolete host copy outside the deferred-list guard.
++        drop(replaced);
+     }
+ 
+     /// Before the list closes: the textures its shaders wrote that are copied
+diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.rs
+--- a/crates/victory-gpu/src/texback.rs
++++ b/crates/victory-gpu/src/texback.rs
+@@ -101,8 +101,11 @@
+ }
+ 
+ pub(crate) fn remapped(at: usize, len: usize) {
+-    let end = at.saturating_add(len);
+-    invalidate(|ticket| at < ticket.end && ticket.at < end);
++    let end = at.saturating_add(len);
++    if end <= at {
++        return;
++    }
++    invalidate(|ticket| at < ticket.end && ticket.at < end);
+ }
+ 
+ pub(crate) struct Target {
+@@ -122,7 +125,11 @@
+         Some(Self { copy, layout, ticket })
+     }
+ 
+-    pub(crate) fn owner(&self) -> usize { self.ticket.owner }
++    pub(crate) fn owner(&self) -> usize { self.ticket.owner }
++
++    pub(crate) fn is_current(&self) -> bool {
++        self.ticket.valid.load(Ordering::Acquire)
++    }
+ }
+ 
+ /// The readback resources and the allocation the pixels belong to.
