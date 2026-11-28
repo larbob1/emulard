@@ -28,7 +28,7 @@ PINS = {
                   "40f1ae02506de251d51e00ebfd36f58e58e7621b"),
 }
 FIXTURES = {
-    "queue.rs": ("ai6_readback_witness.rs", "5d788f3c00eb4a993cbfb0bd88961c43d9376867"),
+    "queue.rs": ("ai6_readback_witness.rs", "102ea5145505ebfb7d846a5829c4659e00d5b1b1"),
     "host.rs": ("ai6_readback_witness_host.rs", "7c76e807a58d1eb972b1d7bedc515f1361fa812d"),
 }
 
@@ -157,7 +157,7 @@ def main():
                 raise ValueError("fixture already present")
             after = inject(normalized, changes, fixture)
             expected_post = {
-                "queue.rs": "cabd9188b2fe7b656612a7a5910b73e4ec707875",
+                "queue.rs": "8a90bd589342f37c9c30f3a9bd64ce473b6f7a83",
                 "host.rs": "84fb1319bf8c0c97d88b55a397a98d19bdbfc0f3",
             }[name]
             if blob(after) != expected_post:
