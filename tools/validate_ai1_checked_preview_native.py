@@ -306,7 +306,11 @@ EXPECTED_IGNORED = frozenset([
 def parse_receipts(stdout, stderr, case):
     markers = ("checked_adapter", "preview_footprint", "preview_delivery",
                "preview_execution", "preview_replay", "preview_refusal")
-    if any(any(k in line for k in markers) for line in stdout.splitlines()):
+    # verify_case has already required exactly one canonical libtest name line.
+    # The actual test names contain receipt marker substrings.
+    name_line = f"test {NAMES[case]} ... ok"
+    if any(line != name_line and any(k in line for k in markers)
+           for line in stdout.splitlines()):
         raise ValueError("receipt in stdout")
     rows = [line for line in stderr.splitlines() if any(k in line for k in markers)]
     if len(rows) != (9 if case == 0 else 2):
@@ -420,6 +424,43 @@ def verify_case(stdout, stderr, code, case, total):
         raise ValueError("missing exact normal receipt")
     parse_receipts(stdout, stderr, case)
 
+def self_check_receipt_parser():
+    """Synthetic parser controls only; not native execution evidence."""
+    adapter = "checked_adapter actual_high=0 actual_low=23932 warp_high=0 warp_low=23932 software=1"
+    replay = [adapter, "preview_footprint lower=2563 total=2563 extent=2816"]
+    for execution in (1, 2):
+        for ordinal in (0, 1):
+            replay.append(
+                f"preview_delivery execution={execution} ordinal={ordinal} required=2560 "
+                "preserve_attempted=1 preserve_requested=2560 preserve_success=1 preserve_done=2560 "
+                "transfer_attempted=1 transfer_requested=2560 transfer_success=1 transfer_done=2560 "
+                "mapped=1 unmapped=1 tiles=4 outcome=Complete semantic=Unresolved gpu_active=48 padding=2512 guards=62976")
+        replay.append(
+            f"preview_execution execution={execution} submitted=1 fence=1 healthy=1 selected=2 recorded=2 delivered=2 missing=1 extent=2816 width0=2816 width1=2816")
+    replay.append("preview_replay executions=2 deliveries=4 distinct=1 geometry_mutated=1 geometry_refused=1 geometry_sentinel=1 cleanup=1")
+    refusal = [adapter, "preview_refusal selected=1 recorded=0 stale=1 submitted=0 missing=1 classifier=12 cleanup=1"]
+    for case, rows in enumerate((replay, refusal)):
+        name = f"test {NAMES[case]} ... ok"
+        out = f"\nrunning 1 test\n{name}\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 220 filtered out; finished in 0.09s\n"
+        err = "\n".join(rows) + "\n"
+        verify_case(out, err, 0, case, 221)
+        bad = (
+            (out + rows[-1] + "\n", err, 0),
+            (out.replace(name, name + " " + rows[-1]), err, 0),
+            (out + name + "\n", err, 0),
+            (out, err + rows[-1] + "\n", 0),
+            (out, err.replace(rows[-1], "prefix " + rows[-1]), 0),
+            (out + rows[-1] + "\n", "\n".join(rows[:-1]), 0),
+            (out, err, 1),
+        )
+        for bad_out, bad_err, code in bad:
+            try:
+                verify_case(bad_out, bad_err, code, case, 221)
+            except ValueError:
+                continue
+            raise ValueError("synthetic receipt parser accepted malformed input")
+    print("synthetic receipt parser controls: 2 valid, 14 invalid rejected; not native receipts", flush=True)
+
 def run_exact(exe, target, release, case):
     profile = "release" if release else "debug"
     env = clean_env()
@@ -461,6 +502,7 @@ def run_exact(exe, target, release, case):
 def main():
     if os.name != "nt":
         raise SystemExit("Windows native execution required")
+    self_check_receipt_parser()
     for path, expected in PINS.items():
         if blob(git(ROOT, "show", f"{REVIEWED}:{path}")) != expected or blob(git(ROOT, "show", f"HEAD:{path}")) != expected or blob(lf((ROOT/path).read_bytes())) != expected:
             raise ValueError("reviewed input identity: " + path)
