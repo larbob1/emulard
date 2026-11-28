@@ -4,7 +4,11 @@
 pub(crate) fn ai6_dependent_consumer_preflight(h: &Host) {
     use windows::core::Interface;
     use windows::Win32::Graphics::Dxgi::{IDXGIAdapter1, DXGI_ADAPTER_FLAG_SOFTWARE};
-    assert!(!late() && !relay() && !timing() && !crate::shadow::cards());
+    for key in ["VICTORY_CARD_BUFFERS", "VICTORY_RELAY", "VICTORY_WIDE_BACK"] {
+        assert_eq!(std::env::var(key).as_deref(), Ok("0"));
+    }
+    assert!(!late() && !relay() && !timing());
+    assert!(!crate::shadow::cards() && !crate::shadow::relay() && !crate::shadow::wide_back());
     let warp = warp_adapter().expect("strict WARP adapter");
     let desc = unsafe { warp.cast::<IDXGIAdapter1>().unwrap().GetDesc1().unwrap() };
     assert_ne!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32,0);
