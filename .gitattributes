@@ -1,3 +1,5 @@
 # Unified-diff context lines encode empty source lines as a single space.
 patches/*.patch whitespace=-blank-at-eol
 patches/*.patch text eol=lf
+# Exact byte-pinned native codec fixture must remain LF on every runner.
+probes/storage_codec_native.rs text eol=lf
