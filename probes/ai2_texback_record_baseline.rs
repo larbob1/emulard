@@ -51,7 +51,7 @@ mod ai2_record_baseline {
             unsafe { std::ptr::write_bytes(p,0xE7,ALLOCATION); }
             pages
         }
-        fn at(&self) -> usize { unsafe { self.0.add(PREFIX) } as usize }
+        fn at(&self) -> usize { (unsafe { self.0.add(PREFIX) }) as usize }
         fn check(&self) {
             let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
             let n = unsafe { VirtualQuery(self.0.cast(),&mut info,std::mem::size_of_val(&info)) };
