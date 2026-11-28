@@ -1,0 +1,42 @@
+name: AI1 owned guest close refusal gate
+
+on:
+  pull_request:
+    branches: [dev/performance-phase6]
+    paths:
+      - 'probes/ai2_texback_guest_close_host.rs'
+      - 'probes/ai2_texback_guest_close_list.rs'
+      - 'probes/ai2_texback_guest_close_observe.rs'
+      - 'probes/ai2_texback_record_resource.rs'
+      - 'docs/ai2-texback-guest-close-refusal.md'
+      - 'tools/prepare_ai2_guest_close_refusal.py'
+      - 'tools/validate_ai1_guest_close_refusal_native.py'
+      - '.github/workflows/ai1-guest-close-refusal-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  guest-close-refusal-native:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'dev/performance-phase6-ai1-guest-close-refusal-native'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw 'candidate checkout mismatch' }
+          Write-Output "candidate_head=$actual"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check runner syntax
+        run: python -m py_compile tools/validate_ai1_guest_close_refusal_native.py
+      - name: Exercise two controls and two refusal observations
+        run: python tools/validate_ai1_guest_close_refusal_native.py
