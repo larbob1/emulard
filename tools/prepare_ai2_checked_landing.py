@@ -39,23 +39,23 @@ COMMON = {
 PATCH = "patches/ai2-checked-landing-common-r2.patch"
 
 def blob(data):
-    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\\0" + data).hexdigest()
+    return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
 def common(data, patch, path):
-    label = ("a/"+path+" b/"+path+"\\n").encode()
+    label = ("a/"+path+" b/"+path+"\n").encode()
     blocks = [b for b in patch.split(b"diff --git ") if b.startswith(label)]
     if len(blocks) != 1:
         raise ValueError("common patch path")
     import re
-    hunks = re.split(rb"(?m)^@@[^\\n]*\\n", blocks[0])[1:]
+    hunks = re.split(rb"(?m)^@@[^\n]*\n", blocks[0])[1:]
     if not hunks:
         raise ValueError("missing common hunks")
     out = data
     inverse = []
     for hunk in hunks:
-        rows = [l for l in hunk.split(b"\\n") if l[:1] in (b" ", b"+", b"-")]
-        before = b"\\n".join(l[1:] for l in rows if l[:1] != b"+") + b"\\n"
-        after = b"\\n".join(l[1:] for l in rows if l[:1] != b"-") + b"\\n"
+        rows = [l for l in hunk.split(b"\n") if l[:1] in (b" ", b"+", b"-")]
+        before = b"\n".join(l[1:] for l in rows if l[:1] != b"+") + b"\n"
+        after = b"\n".join(l[1:] for l in rows if l[:1] != b"-") + b"\n"
         if out.count(before) != 1:
             raise ValueError("nonunique common anchor")
         out = out.replace(before, after, 1)
@@ -134,7 +134,7 @@ def main():
         original = (root/path).read_bytes()
         corrected = writes[path][1] if path in writes else lf(original)
         fixture = lf((ROOT/probe).read_bytes())
-        proposed = corrected + b"\\n" + fixture
+        proposed = corrected + b"\n" + fixture
         if not fixture or blob(proposed) != post or proposed[:-len(fixture)-1] != corrected:
             raise ValueError("append postimage or inverse: "+path)
         writes[path] = (original, proposed)
