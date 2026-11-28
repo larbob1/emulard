@@ -1,0 +1,242 @@
+diff --git a/crates/victory-gpu/src/lib.rs b/crates/victory-gpu/src/lib.rs
+index 19b54e6..bfa6093 100644
+--- a/crates/victory-gpu/src/lib.rs
++++ b/crates/victory-gpu/src/lib.rs
+@@ -43,6 +43,8 @@
+ pub mod frame;
+ #[cfg(windows)]
+ pub mod framelog;
++#[cfg(windows)]
++mod delivery_terminal;
+ #[cfg(windows)]
+ mod host;
+ #[cfg(windows)]
+diff --git a/crates/victory-gpu/src/delivery_terminal.rs b/crates/victory-gpu/src/delivery_terminal.rs
+new file mode 100644
+index 0000000..912d6f3
+--- /dev/null
++++ b/crates/victory-gpu/src/delivery_terminal.rs
+@@ -0,0 +1,223 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++//! Caller-free preview; not invoked by the normal runtime.
++#![allow(dead_code)]
++
++use std::sync::{OnceLock, atomic::{AtomicBool, AtomicU8, Ordering}};
++use windows_sys::Win32::{
++    Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT},
++    System::Threading::{
++        CreateEventW, GetCurrentProcess, INFINITE, SetEvent, Sleep,
++        TerminateProcess, WaitForSingleObject,
++    },
++};
++
++const DELIVERY_UNRESOLVED: u32 = 0xE600_0001;
++const ACK_MS: u32 = 5_000;
++const POLL_MS: u32 = 100;
++const STARTING: u8 = 0;
++const ARMED: u8 = 1;
++const REFUSED: u8 = 2;
++const FAULTED: u8 = 3;
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub(super) enum PrearmError {
++    EventCreation,
++    ThreadCreation,
++    AckTimeout,
++    AckWaitFailed,
++    AckUnexpected,
++    SupervisorFault,
++    TerminalAlreadyRequested,
++}
++
++#[repr(u8)]
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub(super) enum Reason {
++    RequiredDeliveryUnresolved = 1,
++    RetirementUnknown = 2,
++    PreparationUnknown = 3,
++    PublicationUnresolved = 4,
++}
++
++// Private noninheritable handles stored as addresses for sharing.
++// Once a worker may exist, state and handles live until process exit.
++struct State {
++    wake: usize,
++    ack: usize,
++    parking: usize,
++    lifecycle: AtomicU8,
++    reason: AtomicU8,
++    wake_failed: AtomicBool,
++    park_failed: AtomicBool,
++}
++
++struct StartupHandle(HANDLE);
++impl StartupHandle {
++    fn new() -> Result<Self, PrearmError> {
++        // SAFETY: unnamed manual-reset nonsignaled event; null attributes.
++        let handle = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
++        if handle.is_null() {
++            Err(PrearmError::EventCreation)
++        } else {
++            Ok(Self(handle))
++        }
++    }
++    fn into_process_lifetime(self) -> usize {
++        let handle = self.0 as usize;
++        std::mem::forget(self);
++        handle
++    }
++}
++impl Drop for StartupHandle {
++    fn drop(&mut self) {
++        // SAFETY: exclusively owned handle has not been shared.
++        unsafe { CloseHandle(self.0) };
++    }
++}
++
++pub(super) struct Armed(&'static State);
++static PREARM: OnceLock<Result<Armed, PrearmError>> = OnceLock::new();
++
++/// Startup only, before protected work or owner locks. A token is not
++/// proof of causal closure or permission to commit an affected submission.
++pub(super) fn prearm() -> Result<&'static Armed, PrearmError> {
++    match PREARM.get_or_init(start) {
++        Ok(token) => {
++            if token.0.lifecycle.load(Ordering::Acquire) != ARMED {
++                return Err(PrearmError::SupervisorFault);
++            }
++            if token.0.reason.load(Ordering::Acquire) != 0 {
++                return Err(PrearmError::TerminalAlreadyRequested);
++            }
++            Ok(token)
++        }
++        Err(error) => Err(*error),
++    }
++}
++
++fn start() -> Result<Armed, PrearmError> {
++    let wake = StartupHandle::new()?;
++    let ack = StartupHandle::new()?;
++    let parking = StartupHandle::new()?;
++    let state: &'static State = Box::leak(Box::new(State {
++        wake: wake.into_process_lifetime(),
++        ack: ack.into_process_lifetime(),
++        parking: parking.into_process_lifetime(),
++        lifecycle: AtomicU8::new(STARTING),
++        reason: AtomicU8::new(0),
++        wake_failed: AtomicBool::new(false),
++        park_failed: AtomicBool::new(false),
++    }));
++    // No join; retain state and handles even on uncertain partial startup.
++    if std::thread::Builder::new()
++        .name("victory-delivery-terminal-preview".into())
++        .spawn(move || supervise(state))
++        .is_err()
++    {
++        state.lifecycle.store(REFUSED, Ordering::Release);
++        return Err(PrearmError::ThreadCreation);
++    }
++    // SAFETY: stable private process-lifetime ack event.
++    let result = unsafe { WaitForSingleObject(state.ack as HANDLE, ACK_MS) };
++    let error = match result {
++        WAIT_OBJECT_0 => {
++            // Only this caller can arm after acknowledgement.
++            return state.lifecycle
++                .compare_exchange(STARTING, ARMED, Ordering::AcqRel, Ordering::Acquire)
++                .map(|_| Armed(state))
++                .map_err(|_| PrearmError::SupervisorFault);
++        }
++        WAIT_TIMEOUT => PrearmError::AckTimeout,
++        WAIT_FAILED => PrearmError::AckWaitFailed,
++        _ => PrearmError::AckUnexpected,
++    };
++    // Late acknowledgement cannot arm a refused startup.
++    if state.lifecycle.compare_exchange(
++        STARTING, REFUSED, Ordering::AcqRel, Ordering::Acquire,
++    ).is_err() {
++        return Err(PrearmError::SupervisorFault);
++    }
++    Err(error)
++}
++
++fn supervisor_fault(state: &State) {
++    let previous = state.lifecycle.swap(FAULTED, Ordering::AcqRel);
++    if previous == ARMED {
++        // Never silently lose an armed supervisor. This is a distinct
++        // fault, not delivery status or ordinary shutdown.
++        std::process::abort();
++    }
++}
++
++fn supervise(state: &'static State) {
++    // SAFETY: fully initialized private process-lifetime event.
++    if unsafe { SetEvent(state.ack as HANDLE) } == 0 {
++        supervisor_fault(state);
++        return;
++    }
++    loop {
++        match state.lifecycle.load(Ordering::Acquire) {
++            REFUSED | FAULTED => return,
++            STARTING | ARMED => {}
++            _ => { supervisor_fault(state); return; }
++        }
++        if state.reason.load(Ordering::Acquire) != 0 {
++            terminate_delivery(state);
++        }
++        // SAFETY: valid private event; finite fallback if SetEvent fails.
++        let waited = unsafe { WaitForSingleObject(state.wake as HANDLE, POLL_MS) };
++        match waited {
++            WAIT_OBJECT_0 | WAIT_TIMEOUT => {
++                if state.reason.load(Ordering::Acquire) != 0 {
++                    terminate_delivery(state);
++                }
++                if waited == WAIT_OBJECT_0 {
++                    // Wake without reason is a fault, not a spin loop.
++                    supervisor_fault(state);
++                    return;
++                }
++            }
++            WAIT_FAILED => { supervisor_fault(state); return; }
++            _ => { supervisor_fault(state); return; }
++        }
++    }
++}
++
++fn terminate_delivery(state: &State) -> ! {
++    // SAFETY: request termination of this process only. Success is
++    // not proof of externally observed process exit.
++    if unsafe { TerminateProcess(GetCurrentProcess(), DELIVERY_UNRESOLVED) } == 0 {
++        std::process::abort();
++    }
++    park(state)
++}
++
++impl Armed {
++    /// First reason wins. Never returns or unwinds live owner frames.
++    /// No heap, logging, owner lock, COM, or worker join in this path.
++    pub(super) fn request_stop(&self, reason: Reason) -> ! {
++        let state = self.0;
++        let _ = state.reason.compare_exchange(
++            0, reason as u8, Ordering::AcqRel, Ordering::Acquire,
++        );
++        // SAFETY: process-lifetime private event; supervisor also polls.
++        if unsafe { SetEvent(state.wake as HANDLE) } == 0 {
++            state.wake_failed.store(true, Ordering::Release);
++        }
++        park(state)
++    }
++}
++
++fn park(state: &State) -> ! {
++    // SAFETY: private event never signaled or closed. Any return is
++    // anomalous, including WAIT_OBJECT_0 or WAIT_TIMEOUT.
++    match unsafe { WaitForSingleObject(state.parking as HANDLE, INFINITE) } {
++        WAIT_OBJECT_0 | WAIT_TIMEOUT | WAIT_FAILED => {}
++        _ => {}
++    }
++    state.park_failed.store(true, Ordering::Release);
++    loop {
++        // SAFETY: handle-free sleeping fallback; no scheduling guarantee.
++        unsafe { Sleep(1_000) };
++    }
++}
