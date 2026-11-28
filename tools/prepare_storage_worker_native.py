@@ -12,8 +12,8 @@ RAW = "5fe9aba9aa336dcaace3c21e72040de4efb1e0dd"
 PREPARED = "bee5b9d71cb8f11c060b798485bd8e68391b36bd"
 EXECUTE = "1b2d667447f5f3f0f94fcc25f224ffb3e1869277"
 BUILDER = "31bc201ad006b304542e8b03405c1a9090d76804"
-FIXTURE = "f7f8acaaeb5cc6ccaee8e4fa38395817ee837665"
-POST = "1158359a20eff8193be24e01cc328ea24174f6c7"
+FIXTURE = "143131011a9be1cfa39fee828f5369489bfd3ffd"
+POST = "59358fe65fbc835d86a6ddfa493dfacf943b0811"
 START = "fn execute(request: &Request) -> Result<(), HRESULT> {"
 END = "\n/// Inflates a zlib stream into `out`, returning the bytes written."
 SIGNATURE = "fn execute_scratch_review(request: &Request, scratch: &mut NativeScratch) -> Result<(), HRESULT> {"
@@ -76,14 +76,20 @@ def main():
     parser.add_argument("checkout", type=Path)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    target = args.checkout.resolve()
-    if target == ROOT.resolve() or git(target, "rev-parse", "HEAD").decode().strip() != UPSTREAM:
+    target = args.checkout.absolute()
+    if target != target.resolve() or target == ROOT or ROOT in target.parents or target in ROOT.parents:
+        raise ValueError("separate nonsymlink checkout required")
+    if Path(git(target, "rev-parse", "--show-toplevel").decode().strip()).resolve() != target:
+        raise ValueError("checkout root required")
+    if git(target, "rev-parse", "HEAD").decode().strip() != UPSTREAM:
         raise ValueError("isolated pinned upstream checkout required")
     if blob(git(ROOT, "show", "HEAD:tools/build_runtime.py")) != BUILDER:
         raise ValueError("builder identity")
     if blob(git(target, "show", "HEAD:" + PATH)) != RAW:
         raise ValueError("raw identity")
     path = target / PATH
+    if path.resolve() != path or not path.is_file():
+        raise ValueError("nonsymlink prepared source required")
     original = path.read_bytes()
     source = original.replace(b"\r\n", b"\n")
     fragment = (ROOT / "probes/storage_worker_native.rs").read_bytes().replace(b"\r\n", b"\n")
@@ -91,8 +97,11 @@ def main():
         raise ValueError("prepared/fixture identity")
     post = transform(source.decode(), fragment.decode()).encode()
     if args.apply:
-        path.write_bytes(post.replace(b"\n", b"\r\n") if b"\r\n" in original else post)
-        if path.read_bytes().replace(b"\r\n", b"\n") != post:
+        if path.resolve() != path or path.read_bytes() != original:
+            raise ValueError("prepared source changed before write")
+        written = post.replace(b"\n", b"\r\n") if b"\r\n" in original else post
+        path.write_bytes(written)
+        if path.read_bytes() != written:
             raise ValueError("written identity")
         subprocess.run(["git", "diff", "--check"], cwd=target, check=True)
     print(f"raw={RAW} prepared={PREPARED} execute={EXECUTE} fixture={FIXTURE} postimage={POST}")

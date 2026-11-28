@@ -136,7 +136,7 @@ fn worker_native(cap: usize) {
     let pointers: Vec<*mut c_void> = destinations.iter_mut().map(|b| b[8..].as_mut_ptr().cast()).collect();
     let array = WorkerArray(status_array(WORKER_CASES as u32));
     let mut observed = [E_PENDING; WORKER_CASES];
-    // Queue declared after every backing object; Drop drains on unwind.
+    // Queue declared after every backing object; Drop cancels unstarted jobs and waits for running jobs on unwind.
     for (first, last) in [(0, 9), (9, 10)] {
         let queue = WorkerQueue(new_queue(0));
         assert_eq!(WORKER_SPAWNED.load(WorkerOrdering::Acquire), 1);
@@ -161,17 +161,34 @@ fn worker_native(cap: usize) {
     assert_eq!(WORKER_ENTERED.load(WorkerOrdering::Acquire), 1);
     let rows = *WORKER_RECEIPTS.lock().unwrap_or_else(|e| e.into_inner());
     let rows = rows.map(|r| r.expect("missing worker receipt"));
+    let (remaining_lanes, staged) = {
+        let lanes = scheduler().expect("existing scheduler").lock();
+        (lanes.lanes.len(), lanes.staged)
+    };
+    assert_eq!((remaining_lanes, staged), (0, 0));
     let mut delivered = 0usize;
+    let mut success = 0usize;
+    let mut failed = 0usize;
+    let mut guards = 0usize;
     for i in 0..WORKER_CASES {
         let (options, offset, source, dest, expected) = cases[i];
-        assert_eq!(result(array.0, i as u32), expected);
+        let terminal = result(array.0, i as u32);
+        assert_eq!(terminal, expected);
+        assert_eq!(terminal, observed[i]);
         let mut oracle = vec![0xA5; dest + 16];
-        if expected == S_OK {
+        if terminal == S_OK {
+            success += 1;
             let input = if options & MEMORY_SOURCE != 0 { &data[..dest] } else { &data[offset..offset+dest] };
             oracle[8..8+dest].copy_from_slice(input);
-            delivered += dest;
+        } else {
+            assert_ne!(terminal, E_PENDING);
+            failed += 1;
         }
         assert_eq!(destinations[i], oracle);
+        assert_eq!(&destinations[i][..8], &[0xA5; 8]);
+        assert_eq!(&destinations[i][8+dest..], &[0xA5; 8]);
+        guards += destinations[i].len() - dest;
+        if terminal == S_OK { delivered += destinations[i].len() - 16; }
         let r = rows[i];
         assert_eq!((r.slot, r.options, r.source, r.destination, r.hr), (0, options, source, dest, expected));
         if i > 0 {
@@ -194,10 +211,14 @@ fn worker_native(cap: usize) {
                 _ => assert!(r.after >= 4096),
             }
         }
-        println!("storage_worker_case index={} slot={} lane={} seq={} options={} source={} destination={} hr={} before={} after={} calls={} hits={}",
+        eprintln!("storage_worker_case index={} slot={} lane={} seq={} options={} source={} destination={} hr={} before={} after={} calls={} hits={}",
             i, r.slot, r.lane, r.seq, r.options, r.source, r.destination, r.hr, r.before, r.after, r.calls, r.hits);
     }
-    println!("storage_worker_final cap={} spawned=1 entered=1 cases=10 success=8 failed=2 delivered={} drained=1", cap, delivered);
+    assert_eq!((success, failed, delivered, guards), (8, 2, 159744, 160));
+    let spawned = WORKER_SPAWNED.load(WorkerOrdering::Acquire);
+    let entered = WORKER_ENTERED.load(WorkerOrdering::Acquire);
+    eprintln!("storage_worker_final cap={} spawned={} entered={} cases={} success={} failed={} delivered={} guards={} remaining_lanes={} staged={}",
+        cap, spawned, entered, success + failed, success, failed, delivered, guards, remaining_lanes, staged);
 }
 
 #[test]
