@@ -82,13 +82,13 @@ pub(crate) mod ai6_readback_witness {
     pub(crate) fn select(buffer: &ID3D12Resource, at: usize, row: usize, rows: usize, pitch: usize) -> bool {
         let mut skip = false;
         with_observer(|o| {
-            if o.phase == 1 {
+            if o.phase == 2 {
                 require(at == o.a + OFFSET && buffer.as_raw() as usize == o.producer_resource);
                 require((row,rows,pitch) == (ROW,2,PITCH) && o.selected == 0 && o.refused == 0);
                 o.selected = 1;
                 if o.adverse { o.refused = 1; skip = true; }
             } else {
-                require(!o.adverse && o.phase == 4 && at == o.b + OFFSET);
+                require(!o.adverse && o.phase == 5 && at == o.b + OFFSET);
                 require((row,rows,pitch) == (ROW,2,PITCH) && o.selected == 1);
             }
         });
