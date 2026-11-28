@@ -1,0 +1,356 @@
+diff --git a/crates/victory-gpu/src/texback.rs b/crates/victory-gpu/src/texback.rs
+--- a/crates/victory-gpu/src/texback.rs
++++ b/crates/victory-gpu/src/texback.rs
+@@ -279,3 +279,352 @@
+         assert!(track(94, 0x2000, 0x3000).valid.load(Ordering::Acquire));
+     }
+ }
++
++// Caller-free production-helper preview. No legacy caller or default changes.
++#[allow(dead_code)]
++mod checked_preview {
++    use super::*;
++    use victory_formats::texture::{Dimension, Layout};
++
++    // Explicit preview limits, not a new gameplay policy.
++    const MAX_BYTES: usize = 256 * 1024 * 1024;
++    const MAX_SUBRESOURCES: usize = 4096;
++
++    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
++    enum Refusal {
++        Capacity, Acquisition, Stale, Geometry, Format, Device, Buffer, Preservation,
++        Map, Tile, Pending,
++    }
++
++    #[derive(Clone, Copy, Debug)]
++    struct Selected {
++        ordinal: usize,
++        kind: (u64, u32, u32),
++        // Ticket is not an allocation generation. Identity is unresolved.
++    }
++
++    enum State { Pending(Target), Refused(Refusal), Recorded(Recorded) }
++    struct Entry { selected: Selected, state: State }
++    struct RecordingBuilder { entries: Vec<Entry>, poisoned: bool }
++    struct RecordingInventory { entries: Vec<Entry> }
++    struct ExecutionReceipt {
++        execution: u64,
++        selected: Selected,
++        result: Result<LandingReceipt, Refusal>,
++    }
++    impl RecordingInventory {
++        // SAFETY: for this execution the actual GPU retirement and external
++        // backing/writer/alias prerequisites of land_checked hold. Execution
++        // is an external label, not a proof. Every call evaluates afresh.
++        unsafe fn evaluate(&self, execution: u64, ordinal: usize)
++            -> Option<ExecutionReceipt>
++        {
++            let entry = self.entries.get(ordinal)?;
++            let result = match &entry.state {
++                State::Refused(reason) => Err(*reason),
++                State::Pending(_) => Err(Refusal::Pending),
++                State::Recorded(back) => Ok(unsafe { land_checked(back) }),
++            };
++            Some(ExecutionReceipt { execution, selected: entry.selected, result })
++        }
++    }
++
++    impl RecordingBuilder {
++        fn new() -> Self { Self { entries: Vec::new(), poisoned: false } }
++
++        // SAFETY: resource is live and valid for resource queries throughout.
++        unsafe fn select(&mut self, resource: This) -> Result<(), Refusal> {
++            if self.poisoned { return Err(Refusal::Capacity); }
++            let Some(kind) = crate::resource::texture_kind(resource) else { return Ok(()); };
++            if !kinds().contains(&kind) { return Ok(()); }
++            if self.entries.len() >= MAX_SUBRESOURCES || self.entries.try_reserve(1).is_err() {
++                self.poisoned = true;
++                return Err(Refusal::Capacity);
++            }
++            let selected = Selected { ordinal: self.entries.len(), kind };
++            // Account before fallible acquisition. No owner-pointer coalescing.
++            self.entries.push(Entry { selected, state: State::Refused(Refusal::Acquisition) });
++            if let Some(target) = Target::new(resource) {
++                self.entries.last_mut().expect("entry just pushed").state = State::Pending(target);
++            }
++            Ok(())
++        }
++
++        // SAFETY: list is open, all pending target textures are in COPY_SOURCE,
++        // and caller retains the returned inventory until actual GPU retirement.
++        // No submission, transition, notification or recycling is performed here.
++        unsafe fn finish(mut self, list: &ID3D12GraphicsCommandList)
++            -> Result<RecordingInventory, Refusal>
++        {
++            if self.poisoned { return Err(Refusal::Capacity); }
++            for entry in &mut self.entries {
++                let state = std::mem::replace(&mut entry.state, State::Refused(Refusal::Pending));
++                entry.state = match state {
++                    State::Pending(target) => match unsafe { record_checked(list, entry.selected, target) } {
++                        Ok(recorded) => State::Recorded(recorded),
++                        Err(reason) => State::Refused(reason),
++                    },
++                    other => other,
++                };
++            }
++            Ok(RecordingInventory { entries: self.entries })
++        }
++    }
++
++    #[derive(Clone, Copy)]
++    struct Span { offset: usize, pitch: usize, len: usize, rows: usize, row_bytes: usize }
++    struct Recorded {
++        target: Target,
++        buffer: ID3D12Resource,
++        spans: Vec<Span>,
++        extent: usize,
++        required: usize,
++    }
++
++    fn filled<T: Clone>(n: usize, value: T) -> Result<Vec<T>, Refusal> {
++        let mut out = Vec::new();
++        out.try_reserve_exact(n).map_err(|_| Refusal::Capacity)?;
++        out.resize(n, value);
++        Ok(out)
++    }
++
++    // Narrow explicitly typed, single-plane, uncompressed formats; other
++    // selections remain recorded refusals, even if their element sizes match.
++    fn element(format: u32) -> Result<u32, Refusal> {
++        match format {
++            16 => Ok(8),        // R32G32_FLOAT
++            36 | 41 => Ok(4),  // R16G16_UINT, R32_FLOAT
++            61 => Ok(1),        // R8_UNORM
++            _ => Err(Refusal::Format),
++        }
++    }
++
++    fn required(layout: &Layout, ticket: &Ticket) -> Result<usize, Refusal> {
++        let n = usize::try_from(layout.size).map_err(|_| Refusal::Geometry)?;
++        if n == 0 || n > MAX_BYTES || ticket.at == 0
++            || ticket.at.checked_add(n) != Some(ticket.end) {
++            return Err(Refusal::Geometry);
++        }
++        Ok(n)
++    }
++
++    // SAFETY: same open-list/state/lifetime contract as finish.
++    unsafe fn record_checked(list: &ID3D12GraphicsCommandList, selected: Selected, target: Target)
++        -> Result<Recorded, Refusal>
++    {
++        if !target.is_current() { return Err(Refusal::Stale); }
++        let nbytes = required(&target.layout, &target.ticket)?;
++        let (w, h, format) = selected.kind;
++        let bpe = element(format)?;
++        let layout = &target.layout;
++        let d = &layout.desc;
++        if d.dimension != Dimension::Tex2d || d.samples != 1 || d.block != 1
++            || d.element_bytes != bpe || u64::from(d.width) != w || d.height != h
++            || d.mips == 0 || d.depth == 0 || layout.slices != d.depth
++            || layout.mips.len() != d.mips as usize || !layout.addressable()
++            || layout.slice_size.checked_mul(u64::from(layout.slices)) != Some(layout.size) {
++            return Err(Refusal::Geometry);
++        }
++        let host = crate::host::host().ok_or(Refusal::Device)?;
++        let texture = &target.copy.texture;
++        let desc = unsafe { texture.GetDesc() };
++        if desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.Width != w
++            || desc.Height != h || u32::from(desc.MipLevels) != d.mips
++            || u32::from(desc.DepthOrArraySize) != d.depth || desc.SampleDesc.Count != 1
++            || desc.Format.0 as u32 != format {
++            return Err(Refusal::Format);
++        }
++        let mut info = D3D12_FEATURE_DATA_FORMAT_INFO { Format: desc.Format, PlaneCount: 0 };
++        unsafe { host.device.CheckFeatureSupport(D3D12_FEATURE_FORMAT_INFO,
++            (&mut info as *mut D3D12_FEATURE_DATA_FORMAT_INFO).cast(),
++            std::mem::size_of_val(&info) as u32) }.map_err(|_| Refusal::Format)?;
++        if info.PlaneCount != 1 { return Err(Refusal::Format); }
++        let count = d.mips.checked_mul(d.depth).ok_or(Refusal::Geometry)?;
++        let count_usize = usize::try_from(count).map_err(|_| Refusal::Geometry)?;
++        if count_usize == 0 || count_usize > MAX_SUBRESOURCES { return Err(Refusal::Capacity); }
++        let mut footprints = filled(count_usize, D3D12_PLACED_SUBRESOURCE_FOOTPRINT::default())?;
++        let mut rows = filled(count_usize, 0u32)?;
++        let mut row_bytes = filled(count_usize, 0u64)?;
++        let mut spans = filled(count_usize, Span { offset: 0, pitch: 0, len: 0, rows: 0, row_bytes: 0 })?;
++        let mut total = 0u64;
++        unsafe { host.device.GetCopyableFootprints(&desc, 0, count, 0,
++            Some(footprints.as_mut_ptr()), Some(rows.as_mut_ptr()),
++            Some(row_bytes.as_mut_ptr()), Some(&mut total)) };
++        let mut extent = 0usize;
++        let mut active_end_max = 0usize;
++        for i in 0..count_usize {
++            let mip = i % d.mips as usize;
++            let m = &layout.mips[mip];
++            let mw = d.width.checked_shr(mip as u32).unwrap_or(0).max(1);
++            let mh = d.height.checked_shr(mip as u32).unwrap_or(0).max(1);
++            let bytes = u64::from(mw).checked_mul(u64::from(bpe)).ok_or(Refusal::Geometry)?;
++            let fp = footprints[i];
++            let f = fp.Footprint;
++            if (m.width, m.height, m.depth) != (mw, mh, 1)
++                || (f.Width, f.Height, f.Depth) != (mw, mh, 1)
++                || f.Format != desc.Format || rows[i] != mh || row_bytes[i] != bytes
++                || u64::from(f.RowPitch) < bytes || f.RowPitch % 256 != 0 || fp.Offset % 512 != 0 {
++                return Err(Refusal::Geometry);
++            }
++            let offset = usize::try_from(fp.Offset).map_err(|_| Refusal::Geometry)?;
++            let pitch = usize::try_from(f.RowPitch).map_err(|_| Refusal::Geometry)?;
++            let active_rows = usize::try_from(mh).map_err(|_| Refusal::Geometry)?;
++            let active_bytes = usize::try_from(bytes).map_err(|_| Refusal::Geometry)?;
++            let len = pitch.checked_mul(active_rows).ok_or(Refusal::Geometry)?;
++            let end = offset.checked_add(len).ok_or(Refusal::Geometry)?;
++            let active_end = active_rows.checked_sub(1).and_then(|r| pitch.checked_mul(r))
++                .and_then(|n| offset.checked_add(n)).and_then(|n| n.checked_add(active_bytes))
++                .ok_or(Refusal::Geometry)?;
++            if offset < extent || len == 0 || end > MAX_BYTES || end > isize::MAX as usize {
++                return Err(Refusal::Geometry);
++            }
++            spans[i] = Span { offset, pitch, len, rows: active_rows, row_bytes: active_bytes };
++            active_end_max = active_end_max.max(active_end);
++            extent = end;
++        }
++        if total < active_end_max as u64 || total > extent as u64 { return Err(Refusal::Geometry); }
++        let buffer = host.read_back_buffer(extent as u64).ok_or(Refusal::Buffer)?;
++        let bd = unsafe { buffer.GetDesc() };
++        if bd.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || bd.Width < extent as u64 {
++            return Err(Refusal::Buffer);
++        }
++        if !target.is_current() { return Err(Refusal::Stale); }
++        // No fallible checks after the first copy. Retain the target and buffer.
++        for (i, footprint) in footprints.iter().enumerate() {
++            let to = D3D12_TEXTURE_COPY_LOCATION {
++                pResource: unsafe { std::mem::transmute_copy(&buffer) },
++                Type: D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
++                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 { PlacedFootprint: *footprint },
++            };
++            let from = D3D12_TEXTURE_COPY_LOCATION {
++                pResource: unsafe { std::mem::transmute_copy(texture) },
++                Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
++                Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 { SubresourceIndex: i as u32 },
++            };
++            unsafe { list.CopyTextureRegion(&to, 0, 0, 0, &from, None) };
++        }
++        Ok(Recorded { target, buffer, spans, extent, required: nbytes })
++    }
++
++    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
++    struct Call { attempted: bool, requested: usize, success: bool, done: usize }
++    const NONE: Call = Call { attempted: false, requested: 0, success: false, done: 0 };
++    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
++    enum ByteOutcome { NotAttempted, Complete, Incomplete, Unknown }
++    fn classify(call: Call, required: usize) -> ByteOutcome {
++        if required == 0 { return ByteOutcome::Unknown; }
++        if !call.attempted {
++            return if call == NONE { ByteOutcome::NotAttempted } else { ByteOutcome::Unknown };
++        }
++        if !call.success || call.requested == 0 || call.requested > required
++            || call.done > call.requested { return ByteOutcome::Unknown; }
++        if call.requested == required && call.done == required { ByteOutcome::Complete }
++        else { ByteOutcome::Incomplete }
++    }
++
++    // SAFETY: caller proves source/destination spans, lifetime and writable
++    // backing. Kernel status is not a proof of stable writers or aliases.
++    unsafe fn checked_copy(dst: *mut u8, src: *const u8, len: usize) -> Call {
++        use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
++        use windows_sys::Win32::System::Threading::GetCurrentProcess;
++        let mut done = 0usize;
++        let success = unsafe { ReadProcessMemory(GetCurrentProcess(), src.cast(), dst.cast(), len, &mut done) != 0 };
++        Call { attempted: true, requested: len, success, done }
++    }
++
++    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
++    enum SemanticDelivery { Unresolved }
++    struct LandingReceipt {
++        required: usize,
++        preserve: Call,
++        transfer: Call,
++        tiles: usize,
++        mapped: bool,
++        unmapped: bool,
++        refusal: Option<Refusal>,
++        semantic: SemanticDelivery,
++    }
++    impl LandingReceipt {
++        fn new(required: usize) -> Self {
++            Self { required, preserve: NONE, transfer: NONE, tiles: 0, mapped: false,
++                unmapped: false, refusal: None, semantic: SemanticDelivery::Unresolved }
++        }
++        fn bytes(&self) -> ByteOutcome { classify(self.transfer, self.required) }
++    }
++
++    struct Mapping<'a>(&'a ID3D12Resource);
++    impl Drop for Mapping<'_> {
++        fn drop(&mut self) {
++            unsafe { self.0.Unmap(0, Some(&D3D12_RANGE { Begin: 0, End: 0 })) };
++        }
++    }
++
++    // SAFETY: actual healthy GPU retirement of this execution is established
++    // by the future caller; target span is live/readable/writable, backing and
++    // writer/alias exclusion established externally for the entire operation;
++    // mapped active row bytes initialized by this execution, never assume padding.
++    // No proof is manufactured here, and semantic delivery stays unresolved.
++    unsafe fn land_checked(back: &Recorded) -> LandingReceipt {
++        let mut r = LandingReceipt::new(back.required);
++        let _mapping = crate::watch::title_memory_reading();
++        let _tickets = TICKETS.lock().unwrap_or_else(|e| e.into_inner());
++        if !back.target.is_current() {
++            r.refusal = Some(Refusal::Stale); return r;
++        }
++        let ticket = &back.target.ticket;
++        let layout = &back.target.layout;
++        let bd = unsafe { back.buffer.GetDesc() };
++        if required(layout, ticket) != Ok(back.required)
++            || bd.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || bd.Width < back.extent as u64
++            || layout.mips.len().checked_mul(layout.slices as usize) != Some(back.spans.len())
++            || back.spans.iter().any(|s| s.rows == 0 || s.row_bytes == 0 || s.row_bytes > s.pitch
++                || s.rows.checked_mul(s.pitch) != Some(s.len)
++                || s.offset.checked_add(s.len).is_none_or(|end| end > back.extent)) {
++            r.refusal = Some(Refusal::Geometry); return r;
++        }
++        let Ok(mut tiled) = filled(back.required, 0u8) else {
++            r.refusal = Some(Refusal::Capacity); return r;
++        };
++        // Allocate initialized pitched scratch before mapping. GPU copy writes
++        // active rows, not necessarily padding; never form a slice over mapped padding.
++        let max_span = back.spans.iter().map(|s| s.len).max().unwrap_or(0);
++        let Ok(mut scratch) = filled(max_span, 0u8) else {
++            r.refusal = Some(Refusal::Capacity); return r;
++        };
++        r.preserve = unsafe { checked_copy(tiled.as_mut_ptr(), ticket.at as *const u8, back.required) };
++        if classify(r.preserve, back.required) != ByteOutcome::Complete {
++            r.refusal = Some(Refusal::Preservation); return r;
++        }
++        let mut data = std::ptr::null_mut();
++        if unsafe { back.buffer.Map(0, None, Some(&mut data)) }.is_err() {
++            r.refusal = Some(Refusal::Map); return r;
++        }
++        r.mapped = true;
++        let mapping = Mapping(&back.buffer);
++        if !data.is_null() {
++            for (i, span) in back.spans.iter().enumerate() {
++                let linear = &mut scratch[..span.len];
++                linear.fill(0);
++                // Healthy retirement must establish initialized active texels.
++                // Checked rows*pitch and row_bytes<=pitch bound both pointer ranges.
++                for row in 0..span.rows {
++                    let at = row * span.pitch;
++                    unsafe { std::ptr::copy_nonoverlapping(data.cast::<u8>().add(span.offset + at),
++                        linear.as_mut_ptr().add(at), span.row_bytes) };
++                }
++                let mip = i as u32 % layout.desc.mips;
++                let slice = i as u32 / layout.desc.mips;
++                if layout.tile(&mut tiled, mip, slice, linear, span.pitch, span.len).is_err() { break; }
++                r.tiles += 1;
++            }
++        }
++        drop(mapping);
++        r.unmapped = true;
++        if data.is_null() || r.tiles != back.spans.len() {
++            r.refusal = Some(if data.is_null() { Refusal::Map } else { Refusal::Tile }); return r;
++        }
++        crate::watch::writing(ticket.at, back.required);
++        r.transfer = unsafe { checked_copy(ticket.at as *mut u8, tiled.as_ptr(), back.required) };
++        r
++    }
++}
