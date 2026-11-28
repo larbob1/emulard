@@ -154,6 +154,7 @@ def run_exact(exe, target, release, reuse):
     name = PREFIX + ("reuse" if reuse else "baseline")
     env = clean_env()
     env["VICTORY_DISK_WORKERS"] = "1"
+    print("fixture env=VICTORY_DISK_WORKERS=1", flush=True)
     print(f"profile={profile} mode={'W1' if reuse else 'W0'} executable_sha256={hashlib.sha256(exe.read_bytes()).hexdigest()}", flush=True)
     p = direct([str(exe), "--list", "--ignored"], target, env)
     if p.returncode or any(p.stdout.splitlines().count(PREFIX + mode + ": test") != 1 for mode in ("baseline","reuse")):
@@ -175,9 +176,25 @@ def main():
         if blob(git(ROOT, "show", f"{REVIEWED}:{path}")) != expected or blob(git(ROOT, "show", f"HEAD:{path}")) != expected or blob(lf((ROOT/path).read_bytes())) != expected:
             raise ValueError("reviewed input identity: " + path)
     with tempfile.TemporaryDirectory(prefix="ai1-storage-worker-") as tmp:
-        target = Path(tmp) / "runtime"
+        # Windows temp roots may use an 8.3 alias. Canonicalize only the
+        # newly owned directory, never relax the preparer isolation guard.
+        owned = Path(tmp).absolute()
+        if owned.is_symlink() or owned.is_junction() or not owned.is_dir():
+            raise ValueError("unexpected temporary root type")
+        canonical = owned.resolve(strict=True)
+        if not owned.samefile(canonical) or canonical == ROOT or ROOT in canonical.parents or canonical in ROOT.parents:
+            raise ValueError("temporary root identity or overlap")
+        target = canonical / "runtime"
+        if target.exists() or target.is_symlink() or target.is_junction():
+            raise ValueError("runtime child must be absent")
+        print(f"temporary_root_canonicalized={int(owned != canonical)} samefile=1", flush=True)
         subprocess.run([sys.executable, str(ROOT / "tools/build_runtime.py"), str(target),
                         "--paired-wave-refresh"], check=True, timeout=900, env=clean_env())
+        if (target.is_symlink() or target.is_junction() or not target.is_dir()
+                or target.resolve(strict=True) != target or not owned.samefile(canonical)
+                or not target.parent.samefile(canonical)):
+            raise ValueError("runtime child identity")
+        print("runtime_child_canonical=1 root_samefile=1 child_link=0", flush=True)
         if git(target, "rev-parse", "HEAD").decode().strip() != UPSTREAM:
             raise ValueError("upstream identity")
         before = inventory(target)
