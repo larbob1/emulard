@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Append only to a disposable, verified prepared texback.rs.
-#[cfg(all(test, feature = "diagnostics"))]
+#[cfg(all(test, windows, feature = "diagnostics"))]
 mod ai2_publication_baseline {
     use super::*;
     use victory_formats::texture::{Desc, Dimension, Swizzle, Layout};
@@ -10,7 +10,11 @@ mod ai2_publication_baseline {
     use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8_UNORM, DXGI_SAMPLE_DESC};
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 
+    use windows_sys::Win32::System::Memory::{VirtualAlloc, VirtualFree, VirtualQuery,
+        MEMORY_BASIC_INFORMATION, MEM_COMMIT, MEM_RESERVE, MEM_RELEASE, PAGE_READWRITE, MEM_PRIVATE};
+
     const SIZE: usize = 512;
+    const ALLOCATION: usize = 65536;
     const GUARD: usize = 32;
     const ROW: usize = 7;
     fn pattern(y: usize, x: usize) -> u8 {
@@ -34,9 +38,39 @@ mod ai2_publication_baseline {
     }
     fn uncertain() -> ! { std::process::abort() }
 
+    struct OwnedPages(*mut u8);
+    impl OwnedPages {
+        fn new() -> Self {
+            let p = unsafe { VirtualAlloc(std::ptr::null(), ALLOCATION,
+                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) }.cast::<u8>();
+            assert!(!p.is_null());
+            let pages = Self(p);
+            pages.check();
+            unsafe { std::ptr::write_bytes(p, 0xE7, ALLOCATION); }
+            pages
+        }
+        fn check(&self) {
+            let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+            let n = unsafe { VirtualQuery(self.0.cast(), &mut info, std::mem::size_of_val(&info)) };
+            assert_eq!(n, std::mem::size_of_val(&info));
+            assert_eq!(info.BaseAddress as usize, self.0 as usize);
+            assert_eq!(info.State, MEM_COMMIT);
+            assert_eq!(info.Protect, PAGE_READWRITE);
+            assert_eq!(info.Type, MEM_PRIVATE);
+            assert!(info.RegionSize >= ALLOCATION);
+        }
+    }
+    impl Drop for OwnedPages {
+        fn drop(&mut self) {
+            assert_ne!(unsafe { VirtualFree(self.0.cast(), 0, MEM_RELEASE) }, 0);
+        }
+    }
+
     #[test]
+    #[ignore = "requires dedicated WARP and fresh copy-mode process"]
     fn actual_land_publication_baseline() {
         assert_eq!(std::env::var("VICTORY_D3D12_WARP").as_deref(), Ok("1"));
+        assert_eq!(std::env::var("VICTORY_SWEEP").as_deref(), Ok("0"));
         let mode = std::env::var("AI2_EXPECT_COPY").unwrap();
         assert!(mode == "normal" || mode == "none");
         if mode == "normal" {
@@ -53,7 +87,8 @@ mod ai2_publication_baseline {
         let luid = unsafe { device.GetAdapterLuid() };
         assert_ne!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32, 0);
         assert_eq!((luid.HighPart,luid.LowPart),(desc.AdapterLuid.HighPart,desc.AdapterLuid.LowPart));
-        eprintln!("publication_adapter high={} low={} software=1",luid.HighPart,luid.LowPart);
+        eprintln!("publication_adapter actual_high={} actual_low={} warp_high={} warp_low={} software=1",
+            luid.HighPart,luid.LowPart,desc.AdapterLuid.HighPart,desc.AdapterLuid.LowPart);
         let upload = buffer(device,D3D12_HEAP_TYPE_UPLOAD,D3D12_RESOURCE_STATE_GENERIC_READ);
         let readback = buffer(device,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
         unsafe {
@@ -97,25 +132,43 @@ mod ai2_publication_baseline {
             Format:DXGI_FORMAT_R8_UNORM,Width:ROW as u32,Height:2,Depth:1,RowPitch:256
         }};
         for stale in [false,true] {
-            let mut dest = Box::new([0xE7u8; SIZE+2*GUARD]);
-            let at = unsafe { dest.as_mut_ptr().add(GUARD) } as usize;
+            let dest = OwnedPages::new();
+            let at = unsafe { dest.0.add(GUARD) } as usize;
             let owner = at;
             let ticket = track(owner,at,at+SIZE);
             let back = Back{buffer:readback.clone(),footprints:vec![footprint],rows:vec![2],
                 mips:1,layout:layout.clone(),ticket:ticket.clone()};
-            if stale { released(owner); }
+            let mut expected = vec![0xE7u8; ALLOCATION];
+            let current = if stale {
+                released(owner);
+                let new_ticket = track(owner,at,at+SIZE);
+                assert!(!Arc::ptr_eq(&ticket,&new_ticket));
+                // Model an independently initialized replacement generation, including padding.
+                for i in 0..SIZE {
+                    let value = (i.wrapping_mul(37).wrapping_add(113) & 255) as u8;
+                    unsafe { (at as *mut u8).add(i).write(value); }
+                    expected[GUARD+i] = value;
+                }
+                Some(new_ticket)
+            } else { None };
             assert_eq!(ticket.valid.load(Ordering::Acquire),!stale);
+            if let Some(t) = &current { assert!(t.valid.load(Ordering::Acquire)); }
             land(&back);
-            let mut expected = [0xE7u8; SIZE+2*GUARD];
             if !stale && mode=="normal" {
                 for y in 0..2 { for x in 0..ROW { expected[GUARD+y*256+x]=pattern(y,x); } }
             }
-            assert_eq!(*dest,expected,"full destination, padding and guards");
+            dest.check();
+            assert_eq!(unsafe { std::slice::from_raw_parts(dest.0,ALLOCATION) },
+                expected.as_slice(),"full destination, padding and all surrounding bytes");
             assert_eq!(ticket.valid.load(Ordering::Acquire),!stale);
-            eprintln!("publication_case mode={} stale={} active={} guard={} exact=1",mode,usize::from(stale),
-                if !stale && mode=="normal" {14} else {0},2*GUARD);
+            if let Some(t) = &current { assert!(t.valid.load(Ordering::Acquire)); }
+            eprintln!("publication_case mode={} stale={} active={} guard={} newer={} exact=1",
+                mode,usize::from(stale),if !stale && mode=="normal" {14} else {0},
+                ALLOCATION-SIZE,usize::from(current.is_some()));
             drop(back);
             drop(ticket);
+            drop(current);
+            drop(dest);
         }
         unsafe { device.GetDeviceRemovedReason().unwrap(); }
     }
