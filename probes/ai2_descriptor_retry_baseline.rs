@@ -65,7 +65,48 @@ mod ai2_descriptor_retry_baseline {
         assert_eq!(snapshot(&q, INDEX).0, now+1);
         q.done(INDEX, generation);
         assert!(!q.slots.contains_key(&INDEX));
-        eprintln!("descriptor_generation stale_writes=2 stale_operations=7 retry_steps=271 final_looks=255 done=1");
+        // Actual independent shift cap (distinct from most=10 above).
+        let mut cap = TextureQueue::default();
+        cap.written(INDEX, 100, 100, false);
+        let g = snapshot(&cap, INDEX).2;
+        for look in 0..18u32 {
+            cap.later(INDEX, g, 100, 100_000);
+            let expected = if look < 16 { 100 + 2u64.pow(look) } else { 65_636 };
+            assert_eq!(snapshot(&cap, INDEX).0, expected);
+        }
+        // Multi-slot priority: retries newest first, then fresh newest/oldest.
+        let mut order = TextureQueue::default();
+        for index in 1..=6 {
+            order.written(index, 10, if index == 6 {50} else {10}, false);
+        }
+        let tickets: Vec<_> = (1..=6).map(|i| (i,snapshot(&order,i).2)).collect();
+        for i in [2usize,4] { order.later(tickets[i-1].0,tickets[i-1].1,10,16); }
+        let expected = [tickets[3],tickets[1],tickets[4],tickets[0],tickets[2]];
+        for max in 0..=6 {
+            assert_eq!(order.due(11,max),expected[..max.min(5)]);
+        }
+        assert_eq!(order.census(11),[6,5,2,0,1]);
+        // A current hold really delays work, then room returns only this ticket.
+        let (slot,generation)=tickets[2];
+        order.hold(slot,generation,30);
+        assert_eq!(order.held.get(&slot),Some(&generation));
+        assert_eq!(order.due(11,6),expected[..4]);
+        assert_eq!(order.census(11),[6,4,2,0,1]);
+        assert_eq!(order.room(12),1);
+        assert!(order.held.is_empty());
+        assert_eq!(snapshot(&order,slot).0,12);
+        assert_eq!(order.due(12,6),expected);
+        assert_eq!(order.census(12),[6,5,2,0,2]);
+        // Holding an old generation must not change a newly written entry.
+        order.hold(slot,generation,40);
+        order.changed(slot,13,14);
+        let fresh=snapshot(&order,slot);
+        assert_ne!(fresh.2,generation);
+        assert_eq!(order.room(0),0);
+        assert!(order.held.is_empty());
+        assert_eq!(snapshot(&order,slot),fresh);
+        assert_eq!(order.census(12),[6,4,2,0,2]);
+        eprintln!("descriptor_generation stale_writes=2 stale_operations=7 retry_steps=271 final_looks=255 done=1 shift_cap_steps=18 due_limits=7 current_room=1 stale_room=0 census_checks=4");
     }
 
     #[test]
@@ -83,6 +124,16 @@ mod ai2_descriptor_retry_baseline {
         assert_eq!(q.checked(INDEX),Some(prior));
         assert_eq!(q.mapped(INDEX),0);
         assert_eq!(q.due(12,1),vec![(INDEX,write)]);
+        // Baseline partly retains the nonzero fingerprint in this SAME
+        // generation, then later leaves both fields intact.
+        q.partly(INDEX,write,13,24);
+        assert_eq!(q.checked(INDEX),Some(prior));
+        assert_eq!(q.mapped(INDEX),24);
+        q.later(INDEX,write,13,16);
+        assert_eq!(snapshot(&q,INDEX).0,14);
+        assert_eq!(q.checked(INDEX),Some(prior));
+        assert_eq!(q.mapped(INDEX),24);
+        assert_eq!(q.census(14),[1,1,0,1,13]);
         // Separate fresh generation for the partial-coverage witness.
         q.changed(INDEX, 13, 13);
         let write = snapshot(&q, INDEX).2;
@@ -102,6 +153,6 @@ mod ai2_descriptor_retry_baseline {
         assert_eq!(q.mapped(INDEX),0);
         q.later(INDEX, write, 999, 16);
         assert_eq!(snapshot(&q,INDEX),fresh);
-        eprintln!("descriptor_retry_baseline retained_fingerprint=1 retained_mapped=48 partly_zero_mapped=1 new_generation_reset=1");
+        eprintln!("descriptor_retry_baseline retained_fingerprint=1 retained_mapped=48 partly_zero_mapped=1 new_generation_reset=1 combined_retained_mapped=24 combined_retained_fingerprint=1");
     }
 }
