@@ -29,7 +29,7 @@ PINS = {
 }
 FIXTURES = {
     "queue.rs": ("ai6_direct_signal_witness.rs", "a3c4a0c4d51c24b0c723177d4bc83958962b843a"),
-    "host.rs": ("ai6_direct_signal_witness_host.rs", "3dd62952b7752aeb528364ecacaf077ac2e4727c"),
+    "host.rs": ("ai6_direct_signal_witness_host.rs", "d023a00f3627b4652b5e85128ec527d1129b9391"),
 }
 
 def blob(data):
@@ -58,7 +58,7 @@ HOST = [
     ],
     [
         "        copy_back(0, copying.elapsed().as_micros() as u64);\n        for list in runs {\n            // Read backs first: a value written at the bottom of the pipe\n            // may be what tells the title that they are there.\n            read_backs(list);\n            for &(at, what, bytes) in &list.deferred().writes {\n                what.write(at as *mut u8, bytes);\n            }\n        }\n        self.log_messages();",
-        "        copy_back(0, copying.elapsed().as_micros() as u64);\n        for list in runs {\n            // Read backs first: a value written at the bottom of the pipe\n            // may be what tells the title that they are there.\n            read_backs(list);\n            #[cfg(all(test, feature = \"diagnostics\"))]\n            ai6_direct_signal_witness_readback(list);\n            for &(at, what, bytes) in &list.deferred().writes {\n                what.write(at as *mut u8, bytes);\n            }\n        }\n        self.log_messages();"
+        "        copy_back(0, copying.elapsed().as_micros() as u64);\n        for list in runs {\n            // Read backs first: a value written at the bottom of the pipe\n            // may be what tells the title that they are there.\n            read_backs(list);\n            for &(at, what, bytes) in &{\n                let deferred = list.deferred();\n                #[cfg(all(test, feature = \"diagnostics\"))]\n                ai6_direct_signal_witness_readback(list, &deferred);\n                deferred\n            }.writes {\n                what.write(at as *mut u8, bytes);\n            }\n        }\n        self.log_messages();"
     ]
 ]
 QUEUE = []
@@ -145,7 +145,7 @@ def main():
             after = inject(normalized, changes, fixture)
             expected_post = {
                 "queue.rs": "a00dd7fb283b4c13de6f0dae781130331e5d9434",
-                "host.rs": "bc419ee340a05a1732c5272955b76919adb24952",
+                "host.rs": "75b8d658d9bff531150f0e0d49ec457a8c916efd",
             }[name]
             if blob(after) != expected_post:
                 raise ValueError(f"{name} postimage differs from reconstructed pin")
