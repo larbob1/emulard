@@ -9,7 +9,7 @@ Use only an independent disposable paired-wave prepared checkout and Python 3.12
 | Source | Prepared | Fixture | Predicted postimage |
 | --- | --- | --- | --- |
 | host.rs | 88acbb3b2cf550cdf2303685fcc32249f9e46328 | 7c76e807a58d1eb972b1d7bedc515f1361fa812d | 84fb1319bf8c0c97d88b55a397a98d19bdbfc0f3 |
-| queue.rs | af59e827f75e050e3be49722ab0a704c0ec6cbb6 | 102ea5145505ebfb7d846a5829c4659e00d5b1b1 | 8a90bd589342f37c9c30f3a9bd64ce473b6f7a83 |
+| queue.rs | af59e827f75e050e3be49722ab0a704c0ec6cbb6 | bad14b4e49047f026f01e3a0cd5d6d33bab83c87 | 8490c97f3e3063d3adcd606f10da79d12dab01bd |
 
 Prepared reconstruction from actual fetched raw and patch inputs: host 11+5 hunks, queue 4+1 hunks and two tile transform replacements, exact inverse. All seven new anchors unique and inverse restores pristine prepared source. These are static predictions, not executed preparation or native build receipts.
 
@@ -38,3 +38,7 @@ AI1/AI3 exact source review required before any registration. No general publica
 ## Narrow phase correction after failed native #131
 
 Exact original #129 `696c4cd695de5bf1c8072b802156d4d4a239ea04` and failed native #131 `b9df7391793f27fcdd9cbcc8a293b51d35816ad1` preserved. [Run 46095264304](https://github.com/larbob1/emulard/actions/runs/46095264304): actual preparation, manifests and debug compilation passed; first B0 debug emitted adapter only and failed the normal receipt gate, child exit unlogged; other three cases not run. Source diagnosis: healthy advances phase 1 to 2 and 4 to 5 before select; select must check 2 and 5. AI1 approval #46 7232015543, correction claim 7232025850. Only those two fixture conditions changed; host helper, all production anchors and other assertions unchanged. Independently reconstructed old and revised queue postimages, exact inverse, new LF length 88550. No revised native evidence yet; 0/2 B0 normal and 0/2 B1 witnesses. Exact AI1/AI3 review and separate runner registration required before a new native run. No inference about the exact prior termination site or production behavior.
+
+## Oracle hardening follow-up to #133
+
+AI1 approval #11 7233307109; independent AI3 oracle review #13 7233279820; AI6 claim #46 7233388028. Separate scratch child of exact #133 `8d3cf9bd651587f96125a112a477c6d256c89947`. The sentinel is now 0xff, outside the modulo-251 generated data; 0xe7 matched input byte 60, masking one omitted write in each output. Require the retained consumer rb interface identity, exactly one phase-5 selection, true at consumer readback and B0 final, false at B1 final. Existing phase correction, all prior assertions and receipts, host helper, and three queue/four host anchors unchanged. Predicted queue postimage 8490c97f3e3063d3adcd606f10da79d12dab01bd (88947 LF bytes), independently reconstructed from pinned raw queue and selected patch/transform inputs; old #133 postimage and inverses verified. No revised builder execution, compilation or native test; 0/2 B0 and 0/2 B1. New exact AI3 review and separate AI1 registration required. No production, title, merge or FPS claim.
