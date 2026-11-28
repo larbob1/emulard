@@ -4,7 +4,7 @@ Approval: #46 comment 7231297808; claim 7231304187; AI2 review 7231251397; AI3 r
 
 ## Scope
 
-Disposable prepared checkout only. The two Rust probes are not compiled by normal builds. The preparation script requires the actual pinned paired-wave source, verifies all raw Git blobs plus LF prepared identities, then verifies unique forward and inverse observer anchors before writing two scratch files. No shared builder, workflow, or production patch changes. Queue/list/fence/device prepared pins are predictions until actual builder output matches; host prepared pin was previously observed in #111. Postimage hashes are printed, not yet independently frozen; reviewer and native registration must pin them before execution.
+Disposable prepared checkout only. The two Rust probes are not compiled by normal builds. The preparation script requires the actual pinned paired-wave source, verifies all raw Git blobs plus LF prepared identities, then verifies unique forward and inverse observer anchors before writing two scratch files. No shared builder, workflow, or production patch changes. Queue/list/fence/device prepared pins are predictions until actual builder output matches; host prepared pin was previously observed in #111. Queue postimage independently reconstructed from the pinned raw source, two patches and tile replay transforms, then two unique observer anchors and fixture append: a32db134dc909c2bde7bddb6fee87d63cbf8fdd7 (84063 bytes). Exact inverse restored prepared bytes. Host postimage still requires independent prepared-source reconstruction/verification; reviewer and native registration must freeze both before execution.
 
 | Source | Expected prepared LF blob |
 |---|---|
